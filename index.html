@@ -3793,7 +3793,7 @@ function pConnect() {
       ${ft ? `<div class="note ${ft.ok ? '' : 'bad'}" style="margin-top:10px">${esc(ft.msg)} · ${esc(ft.at)}</div>` : ''}
       <p class="foot-note">Test sends <span class="mono">{"action":"test"}</span>, the same as the portal's Test flow button; nothing is created in Shifts. Actions the tool sends are listed below.</p></section></div>
   <div class="cols c2" style="margin-top:14px">
-    <section class="panel"><div class="panel-h"><div class="grow"><h2>Database</h2><p class="sub">Supabase project “Flock Time Study”, tables <span class="mono">crane_pto_*</span> today.</p></div>${dt ? `<span class="pill ${dt.ok ? 'ok' : 'bad'}"><i></i>${dt.ok ? 'Connected' : 'Failed'}</span>` : '<span class="pill muted">Not tested</span>'}</div>
+    <section class="panel"><div class="panel-h"><div class="grow"><h2>Database</h2><p class="sub">${C.standalone ? 'Workforce Tool Supabase project, tables <span class="mono">wft_*</span>.' : 'Supabase project “Flock Time Study”, tables <span class="mono">crane_pto_*</span> today.'}</p></div>${dt ? `<span class="pill ${dt.ok ? 'ok' : 'bad'}"><i></i>${dt.ok ? 'Connected' : 'Failed'}</span>` : '<span class="pill muted">Not tested</span>'}</div>
       <div class="field"><label class="f" for="cDbU">Database URL</label><input class="in mono" id="cDbU" value="${esc(C.dbUrl)}" ${ed ? '' : 'disabled'}></div>
       <div class="field"><label class="f" for="cDbK">Database key (anon / public)</label><input class="in mono" id="cDbK" type="password" autocomplete="off" value="${esc(C.dbKey)}" placeholder="Paste the anon key" ${ed ? '' : 'disabled'}></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" data-a="cDbSave" ${ed ? '' : 'disabled'}>Save &amp; test connection</button><button class="btn" data-a="cDbClear" ${ed ? '' : 'disabled'}>Use sample data only</button></div>
@@ -3843,6 +3843,15 @@ ${DB.on ? '' : '<div class="note warn" style="margin-bottom:10px"><b>Local test 
 async function testDb() {
   const u = CONN.dbUrl.replace(/\/+$/, ''), h = { apikey:CONN.dbKey, Authorization:'Bearer ' + CONN.dbKey };
   const rows = []; let sync = '';
+  if (CONN.standalone) {   // own database: check the tool's wft_* tables as the signed-in user (row-level security hides them from the bare key)
+    try {
+      if (!DB.on || !DB.sb) throw new Error('sign in first');
+      for (const t of ['wft_accounts', 'wft_people', 'wft_schedule', 'wft_settings']) { const { count, error } = await DB.sb.from(t).select('*', { count:'exact', head:true }); rows.push([t, error ? null : count || 0]); }
+      const ok = rows.every(r => r[1] != null);
+      CONN.dbTest = { ok, rows, sync, at:new Date().toLocaleTimeString(), msg:ok ? '' : 'The database answered, but some Workforce Tool tables could not be read: ' + rows.filter(r => r[1] == null).map(r => r[0]).join(', ') };
+    } catch (e) { CONN.dbTest = { ok:false, rows, at:new Date().toLocaleTimeString(), msg:'Could not check the database: ' + e.message + '.' }; }
+    W.audit('Settings', 'Database connection tested', u, '', CONN.dbTest.ok ? 'Connected' : 'Failed', ''); return render();
+  }
   try {
     for (const t of ['crane_pto_roster', 'crane_pto_requests', 'crane_pto_alloc', 'crane_pto_settings']) {
       const r = await fetch(`${u}/rest/v1/${t}?select=id&limit=1`, { headers:{ ...h, Prefer:'count=exact' } });
