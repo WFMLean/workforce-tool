@@ -454,6 +454,7 @@ h1,.drawer header h2{font-family:var(--sans);letter-spacing:-.025em}h1{font-size
 
 .drawer:has(.activity-edit-list){width:min(760px,96vw)}.gname .bcopy{width:auto;min-width:34px}.activity-tools{display:flex;gap:10px;margin:16px 0;flex-wrap:wrap}.activity-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:16px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;margin-bottom:14px}.activity-row label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600}.activity-row .activity-name{grid-column:span 2}.activity-row .in{width:100%;min-width:0}.activity-row button{align-self:end}.activity-edit-list{margin-top:16px}
 .gbk:focus{outline:3px solid var(--accent,#00d5ff);outline-offset:3px;z-index:5}.gbk{cursor:pointer}
+.chart-legend{display:flex;gap:8px 20px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;line-height:1.5}.chart-key{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.chart-key b{font-variant-numeric:tabular-nums;white-space:nowrap}.chart-key small{color:var(--ink3);font-size:11px}.chart-swatch{width:22px;flex:0 0 22px;border-top:3px solid var(--series)}.chart-target .chart-swatch{border-top:2px dotted var(--bad)}.chart-target{color:var(--ink3)}.chart-scroll{overflow-x:auto}.chart-scroll svg{display:block;min-width:400px}.chart-empty{min-height:210px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--ink3);text-align:center;padding:24px}.chart-empty b{color:var(--ink2)}
 </style>
 </head>
 <body>
@@ -2703,7 +2704,7 @@ function pAdherence() {
     <div><div class="l">Early logouts</div><div class="v">${A.T.early}</div><div class="h">Before shift end</div></div>
     <div><div class="l">No login</div><div class="v ${A.T.nol ? 'bad' : ''}">${A.T.nol}</div><div class="h">Scheduled, no absence logged</div></div></div>
   <div class="cols c21" style="margin-bottom:14px">
-    <section class="panel"><div class="panel-h"><div class="grow"><h2>Daily scheduled hours and total work hours</h2><p class="sub">Dashed line = target</p></div></div>${lineChart([{ name:'Scheduled hours worked', color:'var(--acc)', pts:days.map(x => [x.k, pct(x.inA, x.span)]) }, { name:'Total work hours vs schedule', color:'#f5b84a', pts:days.map(x => [x.k, pct(x.log, x.span)]) }], tgt, 80, Math.max(100, ...days.map(x => Math.ceil(pct(x.log, x.span) || 0))))}</section>
+    <section class="panel"><div class="panel-h"><div class="grow"><h2>Daily scheduled hours and total work hours</h2><p class="sub">Percent of scheduled hours · latest values below</p></div></div>${lineChart([{ name:'Scheduled hours worked', color:'var(--acc)', pts:days.map(x => [x.k, pct(x.inA, x.span)]) }, { name:'Total work hours vs schedule', color:'#f5b84a', pts:days.map(x => [x.k, pct(x.log, x.span)]) }], tgt, 80, Math.max(100, ...days.map(x => Math.ceil(pct(x.log, x.span) || 0))))}</section>
     <section class="panel"><h2 style="margin-bottom:8px">By line of business</h2><table><thead><tr><th>LOB</th><th class="n">Adh.</th><th class="n">Conf.</th><th class="n">Late</th><th class="n">No login</th></tr></thead><tbody>
       ${Object.values(A.byLob).map(x => { const p = pct(x.inA, x.span), t = W.ACC[x.k.split('|')[0]].adhTarget; return `<tr><td>${esc(lobName(x.k))}</td><td class="n" style="color:${p >= t ? 'var(--ok)' : 'var(--bad)'}">${fmtPct(p)}</td><td class="n">${fmtPct(pct(x.log, x.span))}</td><td class="n">${x.late}</td><td class="n">${x.nol}</td></tr>`; }).join('')}</tbody></table></section></div>
   <section class="panel"><div class="panel-h"><div class="grow"><h2>Agents</h2><p class="sub">Lowest adherence first. Click an agent to see each day's schedule against their logins.</p></div></div>
@@ -2771,18 +2772,22 @@ function absAgent(id) {
     <table><thead><tr><th>Date</th><th>Reason</th><th>Remark · source</th></tr></thead><tbody>${g.rec.slice().reverse().map(x => `<tr><td class="num">${fmtD(x.d)}</td><td>${abTag(x.reason)}</td><td class="meta">${esc(x.remark)}${x.remark ? ' · ' : ''}${esc(x.source)}</td></tr>`).join('')}</tbody></table>`, `<button class="btn" data-a="close">Close</button>`);
 }
 function lineChart(series, target, lo, hi) {
-  const lbl = Math.max(70, ...series.map(s => (series.length > 1 ? (s.name.length + 6) * 6.4 : 0) + 8)), Wd = 620, H = 210, pl = 36, pr = Math.min(200, lbl), pt = 10, pb = 24, iw = Wd - pl - pr, ih = H - pt - pb, n = Math.max(1, series[0].pts.length - 1);
-  const x = i => pl + iw * i / n, y = v => pt + ih - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * ih;
-  const ticks = [lo, (lo + hi) / 2, hi].map(v => Math.round(v));
-  const every = Math.ceil(series[0].pts.length / 8);
-  return `<svg viewBox="0 0 ${Wd} ${H}" width="100%" role="img" aria-label="Line chart">
-    ${ticks.map(t => `<line x1="${pl}" x2="${Wd - pr}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${pl - 6}" y="${y(t) + 4}" text-anchor="end" font-size="10.5" fill="var(--ink3)">${t}%</text>`).join('')}
-    ${series[0].pts.map((p, i) => i % every === 0 ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="10.5" fill="var(--ink3)">${fmtS(p[0])}</text>` : '').join('')}
-    ${target != null ? `<line x1="${pl}" x2="${Wd - pr}" y1="${y(target)}" y2="${y(target)}" stroke="var(--bad)" stroke-dasharray="4 4"/><text x="${Wd - pr + 4}" y="${y(target) + 4}" font-size="10.5" fill="var(--bad)">target ${target}%</text>` : ''}
-    ${series.map(s => { const pts = s.pts.map((p, i) => p[1] == null ? null : [x(i), y(p[1])]).filter(Boolean); const last = s.pts[s.pts.length - 1];
-      return `<polyline fill="none" stroke="${s.color}" stroke-width="2" points="${pts.map(p => p.join(',')).join(' ')}"/>${pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="2.5" fill="${s.color}"><title>${esc(s.name)} ${fmtS(s.pts[i][0])}: ${fmtPct(s.pts[i][1])}</title></circle>`).join('')}
-      ${series.length > 1 && pts.length ? `<text x="${pts[pts.length - 1][0] + 6}" y="${pts[pts.length - 1][1] + 4}" font-size="11" fill="${s.color}">${esc(s.name)} ${fmtPct(last[1])}</text>` : ''}`; }).join('')}
-  </svg>`;
+  const values = series.flatMap(s => s.pts.map(p => p[1])).filter(Number.isFinite);
+  if (!values.length) return '<div class="chart-empty"><b>No data for this period</b><span>Choose another period or check the schedule and login imports.</span></div>';
+  const dates = [...new Set(series.flatMap(s => s.pts.map(p => p[0])))].sort();
+  const min = Math.min(lo, ...values, ...(Number.isFinite(target) ? [target] : [])), max = Math.max(hi, ...values, ...(Number.isFinite(target) ? [target] : []));
+  const step = Math.max(1, Math.ceil((max - min || 10) / 4 / 5) * 5), bottom = Math.floor(min / step) * step, top = Math.max(bottom + step, Math.ceil(max / step) * step);
+  const Wd = 620, H = 240, pl = 48, pr = 20, pt = 16, pb = 32, iw = Wd - pl - pr, ih = H - pt - pb;
+  const x = d => pl + iw * (dates.length === 1 ? .5 : dates.indexOf(d) / (dates.length - 1)), y = v => pt + ih - (v - bottom) / (top - bottom) * ih;
+  const ticks = []; for (let t = bottom; t <= top; t += step) ticks.push(t);
+  const every = Math.max(1, Math.ceil((dates.length - 1) / 5));
+  return `<div class="line-chart"><div class="chart-legend">${series.map((s,i) => { const last = [...s.pts].reverse().find(p => Number.isFinite(p[1])); return `<div class="chart-key"><span class="chart-swatch" style="--series:${s.color};${i ? 'border-top-style:dashed' : ''}"></span><span>${esc(s.name)}</span><b>${last ? fmtPct(last[1]) : '—'}</b>${last ? `<small>${fmtS(last[0])}</small>` : ''}</div>`; }).join('')}${Number.isFinite(target) ? `<div class="chart-key chart-target"><span class="chart-swatch"></span><span>Target</span><b>${fmtPct(target)}</b></div>` : ''}</div><div class="chart-scroll"><svg viewBox="0 0 ${Wd} ${H}" width="100%" role="img" aria-label="Percentage trend by date. Series values and target are listed above.">
+    ${ticks.map(t => `<line x1="${pl}" x2="${Wd - pr}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${pl - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="var(--ink3)">${t}%</text>`).join('')}
+    ${dates.map((d,i) => i % every === 0 || i === dates.length - 1 && i % every > every / 2 ? `<text x="${x(d)}" y="${H - 8}" text-anchor="${i===0&&dates.length>1?'start':i===dates.length-1&&dates.length>1?'end':'middle'}" font-size="11" fill="var(--ink3)">${fmtS(d)}</text>` : '').join('')}
+    ${Number.isFinite(target) ? `<line x1="${pl}" x2="${Wd - pr}" y1="${y(target)}" y2="${y(target)}" stroke="var(--bad)" stroke-dasharray="3 5"/>` : ''}
+    ${series.map((s,si) => { const byDate = new Map(s.pts), groups = []; let group = []; for (const d of dates) { const v = byDate.get(d); if (Number.isFinite(v)) group.push([d,v]); else if (group.length) { groups.push(group); group = []; } } if (group.length) groups.push(group);
+      return groups.map(g => `<polyline fill="none" stroke="${s.color}" stroke-width="2" ${si ? 'stroke-dasharray="7 4"' : ''} points="${g.map(([d,v]) => `${x(d)},${y(v)}`).join(' ')}"/>${g.map(([d,v]) => `<circle cx="${x(d)}" cy="${y(v)}" r="3" fill="${s.color}" stroke="var(--panel)" stroke-width="1"><title>${esc(s.name)} · ${fmtS(d)}: ${fmtPct(v)}</title></circle>`).join('')}`).join(''); }).join('')}
+  </svg></div></div>`;
 }
 
 /* ---------- AUDIT ---------- */
