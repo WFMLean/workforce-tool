@@ -635,7 +635,7 @@ function baseCode(a, d) {
 }
 function sched(a, d) {
   const o = OV[kOf(a.id, d)] || {}, base = baseCode(a, d), code = o.code || base, sh = SHIFTS[code];
-  return { a, d, code, base, working: code !== 'OFF', s: sh.s, e: sh.e, absence: code !== 'OFF' ? (o.absence || null) : null,
+  return { a, d, code, base, working: code !== 'OFF', s: sh.s, e: sh.e, absence: code !== 'OFF' ? (o.absence || null) : null, rest: code === 'OFF' ? (o.rest || '') : '',
     acts: o.acts || [], remark: o.remark || '', shiftNote: o.shiftNote || '', swap: o.swap || null, changed: !!o.code && o.code !== base, week: weekOf(a, d) ? 'B' : 'A', pattern: patOn(a, d).p };
 }
 
@@ -1449,6 +1449,22 @@ addAccount({ name: 'Riverstone Logistics', team: 'Riverstone Logistics - BPO', t
 /* ---------- Shifts time-sheet import: captures an account's real schedule, clock-ins and time off ---------- */
 const TS_MAP = { 'Holiday': 'Holiday/VTO', 'Domestic Calamity': 'Serious domestic calamity', 'Legal Summons': 'Legal Summon' };
 const TS_UNAPPROVED = { 'Unpaid Leave': 'Personal time-off', 'Time off': 'Paid PTO', 'Other': 'Personal time-off', 'Unjustified Absence': 'Unjustified Leave' };
+const tsName = nm => { nm = String(nm || '').trim(); const r = REASONS.find(x => x.k.toLowerCase() === nm.toLowerCase()); return TS_MAP[nm] || (r ? r.k : nm); };   // Teams spells some reasons differently ("Medical Leave")
+/* Teams can hold several shifts for one person on one day (a working day plus an "OT" shift). The tool keeps one shift per day,
+   so shifts that follow on directly (one ends when the next starts) become one span and each overtime part is kept as a paid "OT"
+   activity inside it. Anything else (a split shift, or overlapping copies) stays separate: the longest block is the day, the rest
+   are listed in `others`, and the Teams check sends those to review. */
+const OT_RX = /^\s*(ot|over\s*-?\s*time)\b/i;
+function mergeDayShifts(list) {
+  const blocks = [];
+  list.slice().sort((x, y) => x.s - y.s || y.e - x.e).forEach(x => { const l = blocks.find(b => b.e === x.s), ot = OT_RX.test(x.label || '') || OT_RX.test(x.notes || '');
+    if (l) { if (ot) l.ot.push([x.s, x.e]); l.e = x.e; l.parts.push(x); }
+    else blocks.push({ s: x.s, e: x.e, parts: [x], ot: ot ? [[x.s, x.e]] : [] }); });
+  const main = blocks.reduce((m, b) => !m || b.e - b.s > m.e - m.s ? b : m, null);
+  if (main && main.ot.length && main.ot.some(o => o[0] === main.s && o[1] === main.e)) main.ot = [];   // a day that is only an OT shift: the shift itself is the OT
+  return { main, others: blocks.filter(b => b !== main) };
+}
+const otRows = b => b.ot.map(o => [o[0], o[1], 'activity', true, 'OT', 'OT', 'purple']);
 const keep = (arr, f) => { const k = arr.filter(f); arr.length = 0; arr.push(...k); };
 function dropAgents(accId, preserveReference = false) {
   const old = new Set(AG.filter(a => a.acc === accId).map(a => a.id));
@@ -1551,7 +1567,7 @@ function importTimesheet(rows, accId, file) {   // rows: {d, group, name, label,
     }
     (r.toff || []).forEach(([reason, hrs]) => {
       if (!(hrs > 0)) return;
-      let R2 = TS_MAP[reason] || reason, note = '';
+      let R2 = tsName(reason), note = '';
       if (!RCFG[R2]) { st.unapproved[reason] = (st.unapproved[reason] || 0) + 1; R2 = TS_UNAPPROVED[reason] || 'Personal time-off'; note = `Shifts reason "${reason}" (not on the approved list)`; }
       st.toff[R2] = (st.toff[R2] || 0) + 1;
       if (a.cap.codes[r.d]) { const o = OV[kOf(a.id, r.d)] = OV[kOf(a.id, r.d)] || {}; o.absence = { reason: R2, remark: [note, `${Math.round(hrs * 10) / 10} h in Shifts`].filter(Boolean).join(' · '), source: 'Shifts time sheet', by: 'Shifts', at: stamp() }; }
@@ -1612,7 +1628,7 @@ function loadLive(accId, L) {
   (L.requests || []).forEach(q => {
     const a = AGI[String(q.empId || '')] || byMail[String(q.email || '').toLowerCase()]; if (!a) return;
     const ds = (q.dates || []).filter(Boolean).sort(); if (!ds.length) return;
-    let reason = TS_MAP[q.reason] || q.reason || 'Personal time-off'; if (!RCFG[reason]) reason = TS_UNAPPROVED[q.reason] || 'Personal time-off';
+    let reason = q.reason ? tsName(q.reason) : 'Personal time-off'; if (!RCFG[reason]) reason = TS_UNAPPROVED[q.reason] || 'Personal time-off';
     const st = /approv/i.test(q.status) ? 'Approved' : /den|declin|reject/i.test(q.status) ? 'Denied' : /cancel|withdraw/i.test(q.status) ? 'Cancelled' : 'Pending';
     const r = { id: q.id || q._id, agent: a.id, reason, from: ds[0], to: ds[ds.length - 1], dates: ds, note: q.notes || '', received: tsOf(q.filedAt) || tsOf(q._updated), status: st, source: q.source || 'Portal',
       decidedBy: q.decidedBy || '', decidedAt: tsOf(q.decidedAt), decisionNote: q.decisionNote || '', shiftsId: (q.teams && q.teams.id) || '', partial: q.dayType === 'partial', startTime: q.startTime || '', endTime: q.endTime || '' };
@@ -1662,20 +1678,54 @@ function loadLiveTeam(accId, J, opt = {}) {
   const G = {}; Object.entries(stOf).forEach(([id, st]) => { const lid = lobIdFor(site, st); G[lid] = G[lid] || { hc: 0, site, station: st }; G[lid].hc++; });
   setLobs(accId, G);
   const local = iso => toZoneLocal(accId, iso);     // shifts arrive in UTC: shown in the account (Shifts team) time zone
-  const codes = {}, days = [];
+  const codes = {}, days = [], perDay = {}, rest = {};
   (J.shifts || []).forEach(s => { if (!s.start || !s.end || !stOf[s.userId]) return; const [d, m] = local(s.start), dur = Math.round((new Date(s.end) - new Date(s.start)) / 6e4); if (dur <= 0) return;
-    (codes[s.userId] = codes[s.userId] || {})[d] = ensureTemplate(m, m + dur, 'Shifts'); days.push(d); });
+    ((perDay[s.userId] = perDay[s.userId] || {})[d] = perDay[s.userId][d] || []).push({ s: m, e: m + dur, label: s.label, notes: s.notes }); });
+  Object.entries(perDay).forEach(([id, byD]) => Object.entries(byD).forEach(([d, list]) => { const { main } = mergeDayShifts(list);
+    (codes[id] = codes[id] || {})[d] = ensureTemplate(main.s, main.e, 'Shifts'); days.push(d); }));
+  /* time off on a day with no shift: rest days tag the day off; other leave (Vacation 8 AM–5 PM) becomes that day's shift, marked absent below */
+  const reasons = new Map((J.reasons || []).map(r => [r.id, r.name])), reasonOf = t => { const nm = reasons.get(t.reasonId) || 'Personal time-off', rs = tsName(nm); return RCFG[rs] ? rs : TS_UNAPPROVED[nm] || 'Personal time-off'; };
+  (J.timeOff || []).forEach(t => { if (!t.start || !t.end || !stOf[t.userId]) return; const [d, m] = local(t.start), rs = reasonOf(t); if ((codes[t.userId] || {})[d]) return;
+    if (RCFG[rs].rest) { (rest[t.userId] = rest[t.userId] || {})[d] = rs; return; }
+    const dur = Math.round((new Date(t.end) - new Date(t.start)) / 6e4); if (dur > 0 && dur <= 16 * 60) { (codes[t.userId] = codes[t.userId] || {})[d] = ensureTemplate(m, m + dur, 'Shifts'); days.push(d); } });
   const first = (J.from ? local(J.from)[0] : days.sort()[0]) || TODAY, last = (J.to ? local(J.to)[0] : days.sort().pop()) || addD(TODAY, 21);
   Object.entries(stOf).forEach(([id, st]) => { const m = mem.get(id) || {}, lid = lobIdFor(site, st);
     const a = { id, name: m.name || 'Shifts user ' + id.slice(0, 6), acc: accId, site, lob: lid, key: accId + '|' + lid, tl: '—', email: (m.mail || '').toLowerCase(), sup: '', station: st, position: m.job || '', hcStatus: 'In HC', inactive: false,
       pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], cap: { codes: { ...(codes[id] || {}) }, first, last, weekEnd: last, stop: true }, lateP: 0, absP: 0, real: true, live: true, fromShifts: true, notInShifts: false, rosterRow: null };
     AG.push(a); AGI[a.id] = a; range(first, last).forEach(d => ensurePlan(a, d, 'Captured from Shifts')); });
-  const reasons = new Map((J.reasons || []).map(r => [r.id, r.name]));
-  (J.timeOff || []).forEach(t => { const a = AGI[t.userId]; if (!a || !t.start) return; const [d] = local(t.start), nm = reasons.get(t.reasonId) || 'Personal time-off'; let rs = TS_MAP[nm] || nm; if (!RCFG[rs]) rs = TS_UNAPPROVED[nm] || 'Personal time-off';
+  (J.timeOff || []).forEach(t => { const a = AGI[t.userId]; if (!a || !t.start) return; const [d] = local(t.start), rs = reasonOf(t);
     const s = sched(a, d); if (s.working && !s.absence) setAbsence(a, d, rs, 'From Shifts', 'Shifts', 'Shifts', '', true); });
+  Object.entries(rest).forEach(([id, byD]) => { const a = AGI[id]; if (a) Object.entries(byD).forEach(([d, rs]) => { if (!sched(a, d).working) (OV[kOf(id, d)] = OV[kOf(id, d)] || {}).rest = rs; }); });
   if (!LIVE.accs.includes(accId)) LIVE.accs.push(accId);
   LIVE.teams = LIVE.teams || {}; LIVE.teams[accId] = { site, people: Object.keys(stOf).length, shifts: (J.shifts || []).length, stations: groups.map(g => g.name), at: stamp() };
   emit(); return LIVE.teams[accId];
+}
+/* Teams request state is authoritative; refreshing must not enqueue a decision. */
+function loadTeamRequests(accId, J) {
+  if (!Array.isArray(J.requests)) return { available:false, count:0, unmatched:0 };
+  const ids = new Set(AG.filter(a => a.acc === accId).map(a => a.id));
+  const reasons = new Map((J.reasons || []).map(r => [r.id, r.name]));
+  let unmatched = 0; const next = [];
+  for (const q of J.requests) {
+    const a = AGI[q.senderUserId];
+    if (!a || a.acc !== accId) { unmatched++; continue; }
+    if (!q.id || !q.startDateTime || !q.endDateTime) continue;
+    const start = new Date(q.startDateTime), end = new Date(q.endDateTime);
+    if (!Number.isFinite(+start) || !Number.isFinite(+end) || end <= start) continue;
+    const [from, sm] = toZoneLocal(accId, start.toISOString());
+    const [to] = toZoneLocal(accId, new Date(+end - 1).toISOString());
+    const [endDay, em] = toZoneLocal(accId, end.toISOString());
+    const nm = reasons.get(q.timeOffReasonId) || 'Personal time-off', mapped = tsName(nm);
+    const reason = RCFG[mapped] ? mapped : TS_UNAPPROVED[nm] || 'Personal time-off';
+    const status = q.state === 'approved' ? 'Approved' : q.state === 'declined' ? 'Denied' : q.state === 'pending' ? 'Pending' : 'Unknown';
+    const ts = v => v ? String(v).slice(0,16).replace('T',' ') : '';
+    next.push({ id:q.id, agent:a.id, reason, from, to, dates:range(from,to), note:q.senderMessage || '',
+      received:ts(q.senderDateTime || q.createdDateTime), status, source:'Teams', shiftsId:q.id,
+      decidedBy:(AGI[q.managerUserId] || {}).name || q.managerUserId || '', decidedAt:ts(q.managerActionDateTime), decisionNote:q.managerActionMessage || '',
+      partial:from === to && !(sm === 0 && endDay !== from && em === 0), startTime:hm(sm), endTime:hm(em) });
+  }
+  keep(REQ, r => !(ids.has(r.agent) && r.source === 'Teams' && r.shiftsId));
+  REQ.push(...next); emit(); return { available:true, count:next.length, unmatched };
 }
 /* what publishing sends: one request per run of consecutive days for one person (window = those site days, shifts in UTC) */
 function publishPayload(a, dates, teamId) {
@@ -1704,7 +1754,10 @@ function shiftsCheck(accId, J, opt = {}) {
   const got = {}, unknown = new Set(), lbl = (s, e) => `${hm(s)}–${hm(e)}`;
   (J.shifts || []).forEach(s => { if (!s.start || !s.end) return; const a = who(s.userId); if (!a) { unknown.add(s.userId); return; }
     const [d, m] = local(s.start), dur = Math.round((new Date(s.end) - new Date(s.start)) / 6e4); if (dur <= 0) return;
-    ((got[a.id] = got[a.id] || {})[d] = got[a.id][d] || []).push({ s: m, e: m + dur, id: s.id, notes: s.notes || '', activities: Array.isArray(s.activities) ? readShiftActivities(accId,d,s.activities) : null }); });
+    ((got[a.id] = got[a.id] || {})[d] = got[a.id][d] || []).push({ s: m, e: m + dur, id: s.id, label: s.label || '', notes: s.notes || '', activities: Array.isArray(s.activities) ? readShiftActivities(accId,d,s.activities) : null }); });
+  Object.values(got).forEach(byD => Object.keys(byD).forEach(d => { const list = byD[d]; if (list.length < 2) return; const { main, others } = mergeDayShifts(list), p = main.parts;   // Working day + OT = one span
+    const acts = p.some(x => x.activities !== null) ? [...p.flatMap(x => x.activities || []), ...otRows(main)] : null;
+    byD[d] = [{ s: main.s, e: main.e, id: p[0].id, ids: p.map(x => x.id), notes: p.map(x => x.notes).filter(Boolean).join(' · '), activities: acts }, ...others.map(b => b.parts[0])]; }));
   const from = opt.from || TODAY, to = opt.to || (J.to ? local(J.to)[0] : addD(TODAY, 28));
   const rows = [], st = { checked: 0, match: 0, time: 0, missing: 0, extra: 0, dup: 0, activities:0, unknown: unknown.size, people: new Set(), side: { shifts: 0, tool: 0, review: 0 } };
   ppl.forEach(a => range(from, to).forEach(d => {
@@ -2062,7 +2115,7 @@ global.WF = {
   // utils
   pad, iso, parse, addD, diffD, dow, range, weekStart, hm, esc, fmtD, fmtS, DOW, pct, fmtPct, dur, initials, TODAY, hashKey,
   // data
-  kOf, readShiftActivities, activityRows, validateActivities, activityPaidMin, shiftSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
+  kOf, readShiftActivities, activityRows, validateActivities, activityPaidMin, shiftSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
   // logic
   get clock() { return WFc.clock; }, set clock(v) { WFc.clock = v; if (WFc.day === TODAY && Math.abs(v - realMin()) > 2) WFc.live = false; emit(); }, realMin,
   get floor() { return { day: WFc.day, clock: WFc.clock, live: WFc.live, zone: WFc.zone }; }, setFloor, lastClockDay,
@@ -2251,7 +2304,7 @@ const GUIDE = [
  ['live','Check who is working now','See who is scheduled, who has clocked in, and who needs attention.', ['Choose an account and location at the top.','Check the people needing attention before reviewing the full list.','Open a person to review their shift and clock-in details. Record an absence or expected arrival only after confirming it.','If clock-in data is missing, check the source before treating someone as absent.']],
  ['builder','Edit and send schedules','Prepare changes, review staffing, then send the changes to Teams Shifts.', ['Choose the week and station or team. In Day view, Bulk breaks & lunch adds, replaces or removes activities for everyone in the current filter or selected people. Preview automatic placement, then Apply to drafts. Lunch can be 60 minutes and breaks 15 minutes.','Choose a shift time, then click a day to add it. In Day view, use the person’s edit button to add activities, set exact-minute durations and choose Paid or Unpaid.','In Day view, drag a shift to move it or drag either edge to change its start or end. Hold the pointer near the left or right timeline edge to scroll automatically. The view stays in place after you drop. Click a break, lunch or coaching activity and press Delete (Mac Delete/Backspace also works) to remove it from the draft. Undo restores it. Review changes before publishing.','Use the person checkboxes before copying schedules or applying a repeating weekly schedule.','Review the staffing totals and your draft changes. Drafts have not been sent to Teams Shifts.','Publish uses Working day as the label and scheduled start–end times as notes. Flow v3 also sends activities; install it before live sending. Select Publish to send the changes. Check the send status and Compare with Teams Shifts afterward. A dry run only previews changes.']],
  ['schedule','View schedules','Read each person’s shifts and days off for the selected week.', ['Choose an account, location and week.','Filter to the station or team you need.','Read the shift times and absence labels. Open a day for details.','Click a day to see its saved original, current schedule and change history. Prepare changes in Edit schedules. Teams is checked every minute while schedule pages are open when the reader is connected; unsent edits and duplicates require review.']],
- ['requests','Review leave requests','Decide on leave after checking how many people will still be available.', ['Open a pending request.','Review the dates, reason and staffing after the requested leave.','Approve or decline the request using the available controls. Add a reason when required.','Check the result and the Teams Shifts send status.']],
+ ['requests','Review leave requests','Decide on leave after checking how many people will still be available.', ['Use Refresh Teams requests if a submission is missing. Check each account’s last read or error; this page refreshes every minute while open.','Open a pending request.','Review the dates, reason and staffing after the requested leave.','Approve or decline the request using the available controls. Add a reason when required.','Check the result and the Teams Shifts send status.']],
  ['swaps','Review shift swaps','Check the proposed exchange and its effect on both people.', ['Open a request waiting for approval.','Review both schedules, staffing, rest time and any warnings.','Approve or decline. If an exception is allowed, explain it in the note.','Check that both schedules reflect the decision.']],
  ['roster','Find people and their supervisors','Look up people, their team, their station and who manages them.', ['Search for a name or filter by account and location.','Use People for individual records.','Use Teams & supervisors to view people grouped by station.','Turn on the missing-details filter to find records without a team or supervisor. Correct the master roster when it is the source.']],
  ['shiftchk','Compare schedules with Teams Shifts','Find differences between schedules in this tool and Microsoft Teams.', ['Choose the account and review the listed differences.','Read which version is confirmed in Teams and which change is still waiting.','Review a difference before sending or replacing anything.','If a send failed, check Teams before retrying to avoid duplicate shifts.']],
@@ -2468,7 +2521,8 @@ function pRequests() {
   if (!list.some(r => r.id === S.sel)) S.sel = list[0] ? list[0].id : null;
   const r = W.REQ.find(x => x.id === S.sel);
   return `<div class="head"><div class="grow"><div class="kicker">From Microsoft Teams</div><h1>PTO <b>requests</b></h1><p class="sub">Every request shows the headcount for each day and hour before you decide. Decisions go back to Teams and Shifts.</p></div>
-    <div class="seg">${['Pending','Decided'].map(k => `<button class="${S.reqTab === k ? 'on' : ''}" data-a="reqTab" data-v="${k}">${k} <span class="num" style="opacity:.6">${W.REQ.filter(x => accOk(W.AGI[x.agent]) && (k === 'Pending' ? x.status === 'Pending' : x.status !== 'Pending')).length}</span></button>`).join('')}</div></div>
+    <button class="btn" data-a="reqRefresh" ${scheduleReadBusy ? 'disabled' : ''}>${scheduleReadBusy ? 'Reading Teams…' : 'Refresh Teams requests'}</button><div class="seg">${['Pending','Decided'].map(k => `<button class="${S.reqTab === k ? 'on' : ''}" data-a="reqTab" data-v="${k}">${k} <span class="num" style="opacity:.6">${W.REQ.filter(x => accOk(W.AGI[x.agent]) && (k === 'Pending' ? x.status === 'Pending' : x.status !== 'Pending')).length}</span></button>`).join('')}</div></div>
+  ${DB.on ? `<div class="note">${W.LIVE.accs.filter(inScope).map(acc => {const q=(DB.requests || {})[acc];return esc(W.ACC[acc].name) + ': ' + (!q ? 'requests not checked yet' : q.err ? esc(q.err) : q.count + ' requests · checked ' + esc(q.at) + (q.unmatched ? ' · ' + q.unmatched + ' could not be matched to the roster' : ''));}).join(' · ')}</div>` : ''}
   <div class="cols c12"><div>${list.slice(0, 60).map(x => { const a = W.AGI[x.agent], v = reqVerdict(x); return `<button class="rq v-${x.status === 'Pending' ? v : x.status === 'Approved' ? 'ok' : 'short'} ${x.id === S.sel ? 'on' : ''}" data-a="selReq" data-v="${x.id}">
       <div class="top2"><span class="nm">${esc(a.name)}</span>${x.status === 'Pending' ? (v === 'short' ? vPill(v) : v === 'tight' ? '<span class="meta" title="Approving leaves the station exactly at its minimum">at minimum</span>' : '') : `<span class="pill ${x.status === 'Approved' ? 'ok' : 'bad'}">${x.status}</span>`}</div>
       <div class="meta">${lobName(a.key)} · ${esc(x.reason)} · ${fmtS(x.from)}${x.dates.length > 1 ? '–' + fmtS(x.to) : ''} · ${x.dates.length} day${x.dates.length > 1 ? 's' : ''}</div>
@@ -2552,7 +2606,7 @@ async function refreshScheduleReads() {
  try { for(const acc of W.LIVE.accs.filter(inScope)) await dbShiftsCheck(acc,null,true); }
  finally { scheduleReadBusy=false; }
 }
-setInterval(()=>{if(['schedule','planvs','shiftchk','builder'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))refreshScheduleReads();},60000);
+setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))(S.page === 'requests' ? refreshTeamRequests() : refreshScheduleReads());},60000);
 
 function cellTitle(s) { return `${s.a.name} · ${fmtD(s.d)} · ${s.working ? W.shiftLabel(s.code) : 'Off'}${s.absence ? ' · ' + s.absence.reason + (s.absence.remark ? ': ' + s.absence.remark : '') : ''}${s.acts.map(x => ' · ' + x.type + ' ' + hm(x.s)).join('')}${s.remark ? ' · ' + s.remark : ''}${s.shiftNote ? ' · Internal saved note: ' + s.shiftNote : ''}`; }
 const lastWhy = () => { try { return JSON.parse(localStorage.getItem('wft.lastWhy') || '{}'); } catch (e) { return {}; } };
@@ -3440,6 +3494,7 @@ const DB = { sb:null, key:'', on:false, profile:null, q:[], users:null, flushing
 const RECOVERY = (() => { const h = location.hash || ''; return { on:/type=recovery/.test(h), err:(h.match(/error_description=([^&]+)/) || [])[1] }; })();
 if (RECOVERY.on) S.recovery = true; if (RECOVERY.err) S.lgErr = decodeURIComponent(RECOVERY.err.replace(/\+/g, ' '));
 function dbClient() {
+  if (DEV) return null; // localhost demo stays isolated even with the deployed database config
   if (!window.supabase || !CONN.dbUrl || !CONN.dbKey) return null;
   if (!DB.sb || DB.key !== CONN.dbKey + CONN.dbUrl) { DB.sb = supabase.createClient(CONN.dbUrl.replace(/\/+$/, ''), CONN.dbKey, { auth:{ persistSession:true, storageKey:'wft-auth', autoRefreshToken:true } }); DB.key = CONN.dbKey + CONN.dbUrl;
     DB.sb.auth.onAuthStateChange(ev => { if (ev === 'PASSWORD_RECOVERY') { S.recovery = true; S.auth = false; render(); } }); }
@@ -3706,13 +3761,35 @@ async function dbReadTeam(accId) {
   for (let i = 0; i < wins.length; i += 4) parts.push(...await Promise.all(wins.slice(i, i + 4).map(w => readWeek(w))));   // 4 weeks at a time
   parts.forEach((p, i) => { if ((p.shifts || []).length >= 5000 || (p.timeOff || []).length >= 5000) console.warn(`${accId} reader: week ${i + 1} hit the 5,000-item limit`); });
   const seen = new Set(), keep = k => !seen.has(k) && seen.add(k);
-  return { ...parts[0], from:iso(new Date(from)), to:iso(new Date(to)),
+  let requestData = {}, requestError = '';
+  try { requestData = await dbReadRequests(accId); } catch(e) { requestError = e.message; }
+  return { ...parts[0], ...(Array.isArray(requestData.requests) ? {requests:requestData.requests} : {}), requestError, from:iso(new Date(from)), to:iso(new Date(to)),
     shifts:parts.flatMap(p => p.shifts || []).filter(x => keep('s' + (x.id || x.userId + x.start + x.end))),
     timeOff:parts.flatMap(p => p.timeOff || []).filter(x => keep('t' + x.userId + x.start + x.end + x.reasonId)) };
+}
+async function dbReadRequests(accId) {
+  const response = await fetch(CONN.readUrl, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'readrequests',teamId:W.ACC[accId].teamId})});
+  if (!response.ok) throw new Error('Request reader returned ' + response.status);
+  const data = await response.json();
+  if (!Array.isArray(data.requests)) throw new Error('The reader needs the v4 Teams requests update');
+  if (data.requests.length >= 5000) throw new Error('Teams requests reached the 5,000-item read limit; check the flow pagination');
+  return data;
+}
+async function refreshTeamRequests() {
+  if(scheduleReadBusy || !DB.on || !CONN.readUrl) return;
+  scheduleReadBusy=true; render(); DB.requests=DB.requests||{};
+  try { for (const acc of W.LIVE.accs.filter(inScope)) {
+    try {const data=await dbReadRequests(acc);const result=W.loadTeamRequests(acc,{...data,reasons:(DB.requestReasons || {})[acc] || []});DB.requests[acc]={...result,err:'',at:new Date().toLocaleTimeString()};}
+    catch(e){DB.requests[acc]={...(DB.requests[acc]||{}),err:e.message,at:new Date().toLocaleTimeString()};}
+  }} finally {scheduleReadBusy=false;render();}
 }
 async function dbShiftsCheck(accId, J, auto = true) {
   const site = ((CONN.pilot || {}).site || {})[accId] || W.LOCNAME[W.ACC[accId].site] || 'Barranquilla';
   try { J = J || await dbReadTeam(accId); } catch (e) { DB.chk = DB.chk || {}; DB.chk[accId] = { err:e.message, at:new Date().toLocaleTimeString() }; return render(); }
+  DB.requests = DB.requests || {};
+  DB.requestReasons=DB.requestReasons||{}; DB.requestReasons[accId]=J.reasons || [];
+  const requestResult = W.loadTeamRequests(accId,J);
+  DB.requests[accId] = { ...requestResult, err:J.requestError || (!requestResult.available ? 'Teams request reader is not configured' : ''), at:new Date().toLocaleTimeString() };
   const opt = { site, from:TODAY, to:W.addD(TODAY, 34) };   // past days are history: the tool never sends them
   let c = W.shiftsCheck(accId, J, opt), took = [];
   if (auto) { c.rows.filter(r => r.side === 'shifts' && !(typeof B !== 'undefined' && (B.draft[r.k] !== undefined || B.brk[r.k] !== undefined))).forEach(r => { if (W.adoptShifts(r)) took.push({ name:r.a.name, d:r.d, from:r.tool, to:r.shiftsLbl }); }); if (took.length) c = W.shiftsCheck(accId, J, opt); }
@@ -3777,13 +3854,14 @@ function pConnect() {
   return `<div class="head"><div class="grow"><div class="kicker">Where the data comes from and where it goes</div><h1><b>Connections</b></h1><p class="sub">Same set-up as your live PTO portal: one Supabase database plus Power Automate flows into and out of Microsoft Shifts and Teams. Values are saved in this browser; the database key is the public (anon) key, and access is protected by database rules, not by hiding it.</p></div></div>
   <section class="panel" style="margin-bottom:14px">${flowDiagram()}</section>
   <div class="cols c2">
-    <section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div class="grow"><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">Flow <b>“Crane Shifts → PTO sync”</b> runs by itself every hour. It reads Shifts and writes into the database; the tool reads the database.</p></div>${dt && dt.sync ? `<span class="pill ok"><i></i>Last sync ${esc(dt.sync.split(' · ')[0])}</span>` : '<span class="pill muted">Last sync: test the database</span>'}</div>
+    ${C.standalone ? `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">The Shifts reader below reads team members, schedules, time off and time-off requests. The tool reads when you sign in; schedules and requests refresh every minute while their page is open.</p></div></div><p class="note">Use <b>Refresh Teams requests</b> on Review leave requests for an immediate check. Its status shows the last request read or an error. Shift swap requests are not connected yet.</p><button class="btn" data-a="reqRefresh" ${scheduleReadBusy ? 'disabled' : ''}>Refresh Teams requests</button></section>` : `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div class="grow"><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">Flow <b>“Crane Shifts → PTO sync”</b> runs by itself every hour. It reads Shifts and writes into the database; the tool reads the database.</p></div>${dt && dt.sync ? `<span class="pill ok"><i></i>Last sync ${esc(dt.sync.split(' · ')[0])}</span>` : '<span class="pill muted">Last sync: test the database</span>'}</div>
       <div class="note" style="margin-bottom:10px"><b>No link is needed here for the hourly sync.</b> The link goes the other way, inside the flow: its HTTP step posts to the database address below, with the anon key in the headers (as the live portal does today).</div>
       <div class="field"><label class="f">Database address used by the flow</label><div style="display:flex;gap:6px"><input class="in mono" readonly value="${esc(C.dbUrl.replace(/\/+$/, ''))}/rest/v1/rpc/crane_pto_ingest_shifts"><button class="btn sm" data-a="cCopyIn">Copy</button></div></div>
       <div class="field"><label class="f" for="cIn">Sync-now trigger URL (optional)</label><input class="in mono" id="cIn" value="${esc(C.inUrl)}" placeholder="Only if the sync flow also has a “When an HTTP request is received” trigger" ${ed ? '' : 'disabled'}></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-a="cInSave" ${ed ? '' : 'disabled'}>Save</button><button class="btn pri" data-a="cInSync" ${ed && C.inUrl ? '' : 'disabled'}>Sync now</button></div>
       ${C.inTest ? `<div class="note ${C.inTest.ok ? '' : 'bad'}" style="margin-top:10px">${esc(C.inTest.msg)} · ${esc(C.inTest.at)}</div>` : ''}
-      <p class="foot-note">Brings in: team members, shifts, time off, time-off reasons and Teams time-off requests (live), plus swap requests (to add). Clock-ins come from the time sheet upload.</p></section>
+      <p class="foot-note">Brings in: team members, shifts, time off, time-off reasons and Teams time-off requests (live), plus swap requests (to add). Clock-ins come from the time sheet upload.</p></section>`}
+
     <section class="panel" style="border-top:3px solid var(--warn)"><div class="panel-h"><div class="grow"><div class="kicker">② Sending · tool → Shifts</div><h2>Sending to Shifts</h2><p class="sub">Approved PTO, swap decisions and published shifts (start/end only) are posted to flow <b>“Crane PTO to Shifts”</b>, which updates Microsoft Shifts.</p></div>${ft ? `<span class="pill ${ft.ok ? 'ok' : 'bad'}"><i></i>${ft.ok ? 'Flow OK' : 'Failed'}</span>` : '<span class="pill muted">Not tested</span>'}</div>
       <div class="field"><label class="f" for="cFl">Power Automate HTTP trigger URL <span class="meta" style="text-transform:none;letter-spacing:0">· the same link as in the live portal's Shifts routing</span></label><input class="in mono" id="cFl" value="${esc(C.flowUrl)}" placeholder="https://default….environment.api.powerplatform.com:443/powerautomate/automations/…/triggers/manual/paths/invoke?…" ${ed ? '' : 'disabled'}></div>
       <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" data-f="cAuto" ${C.autoSend ? 'checked' : ''} ${ed ? '' : 'disabled'}> Send to Shifts automatically on approval / publish</label>
@@ -4623,6 +4701,7 @@ const A = {
   coCopyGo: async () => { const t = $('coTxt'); try { await navigator.clipboard.writeText(t.value); toast('Copied · paste it in Teams'); } catch (e) { t.select(); document.execCommand('copy'); toast('Copied'); } },
   chkType: el => { S.chk.type = el.dataset.v; S.chk.page = 0; render(); },
   chkPage: el => { S.chk.page += +el.dataset.v; render(); },
+  reqRefresh: () => refreshTeamRequests(),
   chkRun: () => { toast('Reading Shifts…'); dbShiftsCheck(S.chk.acc, null, ['Admin','RTA'].includes(W.ME.role)); },
   chkTake: el => { const c = W.SCHK[S.chk.acc], r = c && c.rows.find(x => x.k === el.dataset.v); if (!r) return; W.adoptShifts(r); r.done = true; c.rows = c.rows.filter(x => x !== r); c.st.side[r.side]--; c.st[r.type]--; c.st.match++; toast(`${r.a.name} · ${fmtS(r.d)} now matches Shifts`); render(); },
   chkTakeAll: () => { const c = W.SCHK[S.chk.acc]; if (!c) return; const t = c.rows.filter(r => r.side === 'shifts'); t.forEach(r => W.adoptShifts(r)); toast(`${t.length} day${t.length === 1 ? '' : 's'} taken from Shifts`); dbShiftsCheck(S.chk.acc, null, false); },
