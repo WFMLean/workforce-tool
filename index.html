@@ -2244,7 +2244,7 @@ function phoneBlock() {
 }
 window.addEventListener('resize', () => { const p = isPhone(); if (p !== window.__wasPhone) { window.__wasPhone = p; render(); } });
 function recoveryScreen() {
-  return `<div class="signin"><section class="si-art"><div class="si-logo">${MARK} Workforce<span>Tool</span></div><div class="si-copy"><h2>Set a <b>new</b><br><i>password</i>.</h2><p>Your Supabase account is shared with the other WFM tools, so the new password works there too.</p></div></section>
+  return `<div class="signin"><section class="si-art"><div class="si-logo">${MARK} Workforce<span>Tool</span></div><div class="si-copy"><h2>Set a <b>new</b><br><i>password</i>.</h2><p>Choose a private password for your Workforce Tool login.</p></div></section>
     <section class="si-form"><div class="si-box"><h1>Set a new <span>password</span></h1><p class="sub" style="font-size:14px">At least 12 characters. Use something you don't use anywhere else.</p>
       <div class="field" style="margin-top:24px"><label class="f" for="npA">New password</label><input class="in" id="npA" type="password" autocomplete="new-password"></div>
       <div class="field"><label class="f" for="npB">Repeat it</label><input class="in" id="npB" type="password" autocomplete="new-password"></div>
@@ -2320,7 +2320,7 @@ const GUIDE = [
  ['exempt','Understand absence reasons','See how each reason affects absence totals and staffing.', ['Find the absence reason.','Administrators can select Add absence reason. Enter its name, code and counting rules. Adding it here does not create a reason in Teams Shifts.','Administrators should check the agreed policy before changing a rule.']],
  ['notify','Set team notifications','Choose where updates go and when they are sent.', ['Review the account and message destination.','Check the message content and timing.','Save the settings and check the delivery result where available.']],
  ['connect','Check connected services','Check whether roster, attendance and Teams Shifts connections are working.', ['Review each service’s status and last update.','Use read-only checks to confirm the connection.','If a source is unavailable, ask the administrator to review its configuration.']],
- ['users','Manage access','Give each person the right role and account access.', ['Find the user.','Review their role and assigned accounts.','Tick the pages the person needs within their chosen role, then save the approved access changes.']],
+ ['users','Manage access','Give each person the right role and account access.', ['Choose Add person, enter their work email, and choose their role, accounts and pages.','Choose Add & create login. For a person already listed under Ready to create a login, choose Create login.','Share the temporary password privately. The person signs in here and chooses a private password before access opens. No separate dashboard account creation is needed.','If an unfinished login loses its temporary password, use Reset setup password. Existing active logins are not reset by Create login.']],
  ['audit','Review activity history','See who changed something and when.', ['Filter by account, date or action.','Read the earlier value, new value and any note.','Use this history to investigate a change before correcting it.']],
  ['settings','Change tool settings','Manage repeating schedules, absence rules and publishing preferences.', ['Open the section you need.','Read the current rule and its effect before changing it.','Check whether publishing is a dry run or live for the selected account.','Save and review the result.']],
  ['overview','Read the account summary','See staffing and pending work across the accounts you can access.', ['Choose one account or All accounts.','Review the totals and items needing attention.','Open a related page to investigate the details.']]
@@ -3021,15 +3021,27 @@ function pNotify() {
 const ROLE_DESC = { Admin:'Everything, including users, roster, allocation rules and settings', RTA:'Who is working now, PTO decisions, schedule edits, reports for their accounts', 'Team lead':'Their accounts: live floor, requests, schedule, reports', Executive:'Overview and reports, read-only' };
 function pUsersDb() {
   const U = DB.users || { profiles:[], invites:[] }, accN = sc => sc.includes('all') ? 'All' : sc.map(x => W.ACC[x] ? W.ACC[x].name : x).join(', ') || '—';
-  return `<div class="head"><div class="grow"><div class="kicker">Supabase Auth · roles in wft_profiles · row-level security</div><h1>Users &amp; <b>access</b></h1><p class="sub">Give someone access by adding them here with a role and accounts. When they sign in with that email, they get exactly that access.</p></div><button class="btn" data-a="dbUsersReload">Refresh</button><button class="btn pri" data-a="newUser">Add person</button></div>
+  return `<div class="head"><div class="grow"><div class="kicker">Manage logins · roles · account access</div><h1>Users &amp; <b>access</b></h1><p class="sub">Add a person, choose their role and accounts, then create their login here. They set a private password at first sign-in.</p></div><button class="btn" data-a="dbUsersReload">Refresh</button><button class="btn pri" data-a="newUser">Add person</button></div>
   ${U.err ? `<div class="note bad" style="margin-bottom:12px">${esc(U.err)}</div>` : ''}
   <section class="panel" style="margin-bottom:14px"><h2 style="margin-bottom:8px">People with access</h2><div class="tw"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Accounts</th><th>Status</th><th>Last seen</th><th></th></tr></thead><tbody>
-  ${U.profiles.map(p => `<tr><td class="nm">${esc(p.name)}</td><td class="meta">${esc(p.email)}</td><td>${p.role === 'Pending' ? '<span class="pill warn">Waiting for a role</span>' : esc(p.role)}</td><td>${esc(accN(p.scope))}</td>
+  ${U.profiles.map(p => `<tr><td class="nm">${esc(p.name)}</td><td class="meta">${esc(p.email)}</td><td>${p.role === 'Pending' ? '<span class="pill warn">Waiting for setup</span>' : esc(p.role)}</td><td>${esc(accN(p.scope))}</td>
     <td><span class="pill ${p.status === 'Active' ? 'ok' : 'muted'}"><i></i>${esc(p.status)}</span></td><td class="num">${p.last_seen ? esc(new Date(p.last_seen).toLocaleString()) : '—'}</td>
-    <td class="nowrap">${p.id !== DB.profile.id ? `<button class="btn sm" data-a="dbEditProfile" data-v="${p.id}">Edit</button> <button class="btn sm ${p.status === 'Disabled' ? 'ok' : 'bad'}" data-a="dbToggleProfile" data-v="${p.id}">${p.status === 'Disabled' ? 'Enable' : 'Disable'}</button>` : '<span class="meta">You</span>'}</td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Nobody yet.</div></td></tr>'}</tbody></table></div></section>
-  <section class="panel" style="margin-bottom:14px"><h2 style="margin-bottom:8px">Added, not signed in yet</h2><div class="tw"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Accounts</th><th>Added</th><th></th></tr></thead><tbody>
-  ${U.invites.filter(i => !U.profiles.some(p => p.email === i.email.toLowerCase())).map(i => `<tr><td class="nm">${esc(i.name)}</td><td class="meta">${esc(i.email)}</td><td>${esc(i.role)}</td><td>${esc(accN(i.scope))}</td><td class="meta">${esc(new Date(i.created_at).toLocaleDateString())} · ${esc(i.created_by || '')}</td><td><button class="btn sm bad" data-a="dbDelInvite" data-v="${esc(i.email)}">Remove</button></td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">No one waiting.</div></td></tr>'}</tbody></table></div>
-    <p class="foot-note">The person also needs a sign-in in Supabase. If they don't have one yet: Supabase → Authentication → Users → <b>Add user</b> (or <b>Send invitation</b>) with the same email. Their first sign-in here picks up this role.</p></section>`;
+    <td class="nowrap">${p.id !== DB.profile.id ? `<button class="btn sm" data-a="dbEditProfile" data-v="${p.id}">Edit</button> ${p.role==='Pending'?`<button class="btn sm" data-a="dbResetSetup" data-v="${esc(p.email)}">Reset setup password</button>`:''} <button class="btn sm ${p.status === 'Disabled' ? 'ok' : 'bad'}" data-a="dbToggleProfile" data-v="${p.id}">${p.status === 'Disabled' ? 'Enable' : 'Disable'}</button>` : '<span class="meta">You</span>'}</td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Nobody yet.</div></td></tr>'}</tbody></table></div></section>
+  <section class="panel" style="margin-bottom:14px"><h2 style="margin-bottom:8px">Ready to create a login</h2><div class="tw"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Accounts</th><th>Added</th><th></th></tr></thead><tbody>
+  ${U.invites.filter(i => !U.profiles.some(p => p.email === i.email.toLowerCase())).map(i => `<tr><td class="nm">${esc(i.name)}</td><td class="meta">${esc(i.email)}</td><td>${esc(i.role)}</td><td>${esc(accN(i.scope))}</td><td class="meta">${esc(new Date(i.created_at).toLocaleDateString())} · ${esc(i.created_by || '')}</td><td><button class="btn sm pri" data-a="dbCreateLogin" data-v="${esc(i.email)}">Create login</button> <button class="btn sm bad" data-a="dbDelInvite" data-v="${esc(i.email)}">Remove</button></td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">No one waiting.</div></td></tr>'}</tbody></table></div>
+    <p class="foot-note">Create login shows a temporary password once. Share it privately with that person. Their first sign-in asks them to choose a password before their assigned access opens.</p><button class="btn sm" data-a="dbCheckUserSetup">Check login setup connection</button></section>`;
+}
+async function dbUserAdmin(body) {
+  const {data,error}=await dbClient().functions.invoke('wft-user-admin',{body});
+  if(error){let message=error.message;try{message=(await error.context.json()).error||message;}catch(_){}throw Error(message);}
+  if(data?.error)throw Error(data.error);return data;
+}
+let creatingLogin=false;
+async function dbCreateLogin(email, action='create') {
+  if(creatingLogin)return;creatingLogin=true;
+  try{const result=await dbUserAdmin({action,email});await dbLoadUsers();render();
+    open('Login created',`<p><b>${esc(result.name)}</b> · ${esc(result.email)}</p><p class="sub">Temporary password — shown once</p><div class="pw" style="overflow-wrap:anywhere;user-select:all">${esc(result.temporaryPassword)}</div><p class="note">Share this privately with the person. Sign in at <b>${esc(location.origin+location.pathname)}</b>. They will choose a new password before their role and accounts become available.</p>`, '<button class="btn pri" data-a="close">Done</button>');$('drawer').dataset.secret='true';
+  }catch(e){toast('Login setup incomplete: '+e.message);}finally{creatingLogin=false;}
 }
 function dbUserDrawer(p) {
   const roles = ['Admin','RTA','Team lead','Executive'], sc = p ? p.scope : ['all'];
@@ -3037,7 +3049,7 @@ function dbUserDrawer(p) {
     ${p ? `<p class="sub" style="margin-bottom:10px">${esc(p.email)}</p>` : `<div class="field"><label class="f" for="uN">Full name</label><input class="in" id="uN" placeholder="e.g. Paola Ruiz"></div><div class="field"><label class="f" for="uE">Work email</label><input class="in" id="uE" type="email" placeholder="name@leangroup.com"></div>`}
     <div class="field"><label class="f" for="uR">Role</label><select class="in" id="uR" style="width:100%">${roles.map(r => `<option ${p && p.role === r ? 'selected' : (!p && r === 'RTA' ? 'selected' : '')}>${r}</option>`).join('')}</select><p class="foot-note">${Object.entries(ROLE_DESC).map(([k, v]) => `<b>${k}</b>: ${v}`).join('<br>')}</p></div>
     ${accessChecklist(p)}<div class="field"><label class="f">Accounts</label><label style="display:block"><input type="checkbox" id="uAll" ${sc.includes('all') ? 'checked' : ''}> All accounts (current and future)</label>${W.ACCOUNTS.map(a => `<label style="display:block"><input type="checkbox" class="uAcc" value="${a.id}" ${sc.includes(a.id) ? 'checked' : ''}> ${a.name}</label>`).join('')}</div>`,
-    `<button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="dbSaveUser" data-v="${p ? p.id : ''}">${p ? 'Save' : 'Add'}</button>`);
+    `<button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="dbSaveUser" data-v="${p ? p.id : ''}">${p ? 'Save' : 'Add & create login'}</button>`);
 }
 function pUsers() {
   if (DB.on) return pUsersDb();
@@ -3506,7 +3518,11 @@ function dbClient() {
   return DB.sb;
 }
 async function dbAfterSignIn() {
-  const sb = dbClient(), { data:p, error } = await sb.rpc('wft_ensure_profile');
+  const sb = dbClient();
+  const {data:identity,error:identityError}=await sb.auth.getUser();
+  if(identityError){S.lgErr=identityError.message;S.auth=false;return render();}
+  if(identity.user?.app_metadata?.wft_password_setup){S.passwordSetup=true;S.recovery=true;S.auth=false;S.lgErr='';return render();}
+  const { data:p, error } = await sb.rpc('wft_ensure_profile');
   if (error) { await sb.auth.signOut(); S.lgErr = 'Signed in, but the Workforce Tool tables could not be read: ' + error.message; S.auth = false; return render(); }
   if (p.status === 'Disabled') { await sb.auth.signOut(); S.lgErr = 'This account is disabled. Ask your WFM admin.'; S.auth = false; return render(); }
   if (p.role === 'Pending') { await sb.auth.signOut(); S.lgErr = `Signed in as ${p.email}, but no role has been given yet. Ask your WFM admin to open Users & access and set your role.`; S.auth = false; return render(); }
@@ -4398,7 +4414,7 @@ document.addEventListener('input', e => { if (e.target.id === 'cmdQ') { CMD.i = 
 /* ---------- drawer ---------- */
 let opener = null;
 function open(t, b, f) { opener = document.activeElement; $('drT').innerHTML = t; $('drB').innerHTML = b; $('drF').innerHTML = f || ''; $('drawer').classList.add('on'); $('scrim').classList.add('on'); $('drawer').setAttribute('aria-hidden', 'false'); setTimeout(() => { const x = $('drawer').querySelector('select,textarea,input,.btn.pri'); x && x.focus(); }, 40); }
-function close() { $('drawer').classList.remove('on'); $('scrim').classList.remove('on'); $('drawer').setAttribute('aria-hidden', 'true'); if (opener && document.contains(opener)) opener.focus(); }
+function close() { if($('drawer').dataset.secret){$('drB').textContent='';delete $('drawer').dataset.secret;} $('drawer').classList.remove('on'); $('scrim').classList.remove('on'); $('drawer').setAttribute('aria-hidden', 'true'); if (opener && document.contains(opener)) opener.focus(); }
 
 /* ---------- actions ---------- */
 const A = {
@@ -4418,10 +4434,11 @@ const A = {
     if (a.length < 12) { S.lgErr = 'Use at least 12 characters.'; return render(); }
     if (a !== b) { S.lgErr = 'The two passwords don\'t match.'; return render(); }
     const sb = dbClient(); if (!sb) { S.lgErr = 'The database connection is not set.'; return render(); }
-    const { error } = await sb.auth.updateUser({ password:a });
+    let error;
+    if(S.passwordSetup){try{await dbUserAdmin({action:'complete',password:a});await sb.auth.refreshSession();}catch(e){error=e;}}else{({error}=await sb.auth.updateUser({password:a}));}
     if (error) { S.lgErr = /session|jwt|expired/i.test(error.message) ? 'This reset link has expired. Ask for a new one from the sign-in page.' : error.message; return render(); }
-    history.replaceState(null, '', location.pathname); S.recovery = false; S.lgErr = ''; toast('Password saved'); await dbAfterSignIn(); W.audit('Access', 'Password changed', W.ME.email, '', '', 'Reset link'); },
-  cancelRecovery: async () => { const sb = dbClient(); if (sb) await sb.auth.signOut(); history.replaceState(null, '', location.pathname); S.recovery = false; S.lgErr = ''; render(); },
+    history.replaceState(null, '', location.pathname); S.recovery = false; S.passwordSetup=false; S.lgErr = ''; toast('Password saved'); await dbAfterSignIn(); W.audit('Access', 'Password changed', W.ME.email, '', '', 'Reset link'); },
+  cancelRecovery: async () => { S.passwordSetup=false; const sb = dbClient(); if (sb) await sb.auth.signOut(); history.replaceState(null, '', location.pathname); S.recovery = false; S.lgErr = ''; render(); },
   toSignup: () => { S.signup = true; S.lgErr = ''; render(); setTimeout(() => $('suN') && $('suN').focus(), 20); },
   toSignin: () => { S.signup = false; S.lgErr = ''; render(); },
   signup: async () => { const sb = dbClient(), name = $('suN').value.trim(), em = $('suE').value.trim().toLowerCase(), a = $('suA').value, b = $('suB').value;
@@ -4545,22 +4562,25 @@ const A = {
   nCopy: () => { const N = W.NOTIFY, L = W.outList(TODAY, { acc:S.acc }).filter(x => inScope(x.a.acc)); const txt = `Out today · ${fmtD(TODAY)}\n` + L.map(x => `• ${x.a.name} (${lobName(x.a.key)}, ${W.shiftLabel(x.shift)}): ${N.detail === 'category' ? (x.type === 'planned' ? 'Planned leave' : 'Unplanned absence') : x.reason}`).join('\n');
     (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copied'), () => toast('Clipboard blocked by the browser')); },
   newUser: () => DB.on ? dbUserDrawer(null) : userDrawer(null),
+  dbCheckUserSetup: async () => { try{await dbUserAdmin({action:'check'});toast('Login setup is connected');}catch(e){toast(e.message);} },
+  dbResetSetup: async el => dbCreateLogin(el.dataset.v,'resetSetup'),
+  dbCreateLogin: async el => dbCreateLogin(el.dataset.v),
   dbUsersReload: async () => { await dbLoadUsers(); render(); },
-  dbEditProfile: el => dbUserDrawer(DB.users.profiles.find(p => p.id === el.dataset.v)),
+  dbEditProfile: el => {const p=DB.users.profiles.find(p=>p.id===el.dataset.v),i=DB.users.invites.find(i=>i.email===p.email);dbUserDrawer(p.role==='Pending'&&i?{...p,role:i.role,scope:i.scope}:p);},
   dbToggleProfile: async el => { const p = DB.users.profiles.find(x => x.id === el.dataset.v), st = p.status === 'Disabled' ? 'Active' : 'Disabled';
     const { error } = await DB.sb.from('wft_profiles').update({ status:st }).eq('id', p.id); if (error) return toast(error.message);
     W.audit('Access', st === 'Active' ? 'Account enabled' : 'Account disabled', p.email, p.status, st, ''); await dbLoadUsers(); toast(st === 'Active' ? 'Enabled' : 'Disabled'); render(); },
   dbDelInvite: async el => { const { error } = await DB.sb.from('wft_invites').delete().eq('email', el.dataset.v); if (error) return toast(error.message); W.audit('Access', 'Invite removed', el.dataset.v, '', '', ''); await dbLoadUsers(); render(); },
   dbSaveUser: async el => { const scope = $('uAll').checked ? ['all'] : [...document.querySelectorAll('.uAcc:checked')].map(x => x.value), role = $('uR').value;
     if (!scope.length) return toast('Pick at least one account');
-    if (el.dataset.v) { const p = DB.users.profiles.find(x => x.id === el.dataset.v); const { error } = await DB.sb.from('wft_profiles').update({ role, scope }).eq('id', p.id); if (error) return toast(error.message);
+    if (el.dataset.v) { const p = DB.users.profiles.find(x => x.id === el.dataset.v); const setup=p.role==='Pending'&&DB.users.invites.some(i=>i.email===p.email); const { error } = setup?await DB.sb.from('wft_invites').update({role,scope}).eq('email',p.email):await DB.sb.from('wft_profiles').update({ role, scope }).eq('id', p.id); if (error) return toast(error.message);
       W.audit('Access', 'Role changed', p.email, `${p.role} · ${p.scope.join('/')}`, `${role} · ${scope.join('/')}`, ''); }
     else { const email = $('uE').value.trim().toLowerCase(), name = $('uN').value.trim(); if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(email)) return toast('Enter a valid work email');
       const ex = DB.users.profiles.find(x => x.email === email);
       if (ex) { const { error } = await DB.sb.from('wft_profiles').update({ role, scope, name:name || ex.name }).eq('id', ex.id); if (error) return toast(error.message); }
       else { const { error } = await DB.sb.from('wft_invites').upsert({ email, name, role, scope, created_by:W.ME.name }); if (error) return toast(error.message); }
       W.audit('Access', ex ? 'Role changed' : 'Person added', email, ex ? ex.role : '', `${role} · ${scope.join('/')}`, name); }
-    const email = el.dataset.v ? DB.users.profiles.find(x => x.id === el.dataset.v).email : $('uE').value.trim().toLowerCase(); if (!await saveAccessChecklist(email,role)) return; close(); await dbLoadUsers(); toast('Saved'); render(); },
+    const email = el.dataset.v ? DB.users.profiles.find(x => x.id === el.dataset.v).email : $('uE').value.trim().toLowerCase(); if (!await saveAccessChecklist(email,role)) return; const needsLogin=!el.dataset.v&&!DB.users.profiles.some(p=>p.email===email); close(); await dbLoadUsers(); render(); if(needsLogin) await dbCreateLogin(email); else toast('Saved'); },
   editUser: el => userDrawer(W.USERS.find(u => u.id === el.dataset.v)),
   saveUser: el => { const scope = $('uAll').checked ? ['all'] : [...document.querySelectorAll('.uAcc:checked')].map(x => x.value);
     if (!scope.length) return toast('Pick at least one account');
