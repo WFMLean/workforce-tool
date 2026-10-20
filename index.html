@@ -1438,10 +1438,11 @@ function rollPreview() {
 }
 function runRoll(by) {
   const pv = rollPreview(), ws = pv[0].ws, n = { roll: 0, changed: 0, pattern: 0, none: 0 };
-  pv.forEach(x => { n[x.st]++; if (x.st === 'roll' || x.st === 'changed' || x.st === 'pattern') queueSync(x.a, x.st === 'roll' ? 'Publish week (auto-roll)' : 'Publish week', range(ws, addD(ws, 6)).filter(d => sched(x.a, d).working), 'schedule/shifts (batch)', null, CFG.autoPublish ? 'Confirmed' : 'Draft'); });
+  pv.forEach(x => { n[x.st]++; if (x.st === 'roll' || x.st === 'changed' || x.st === 'pattern') queueSync(x.a, x.st === 'roll' ? 'Publish week (auto-roll)' : 'Publish week', range(ws, addD(ws, 6)).filter(d => sched(x.a, d).working), 'schedule/shifts (batch)', null, x.a.live || !CFG.autoPublish ? 'Draft' : 'Confirmed'); });   // live people: a Draft to publish on purpose, never 'Confirmed' without sending
   PUB.until = addD(PUB.until, 7);
   pv.forEach(x => range(ws, addD(ws, 6)).forEach(d => ensurePlan(x.a, d, x.st === 'roll' ? 'Auto-roll' : x.st === 'changed' ? 'Captured from Shifts' : 'Pattern')));
   audit('Schedule', 'Week published', `Week of ${fmtS(ws)}`, '', `${n.roll} repeated last week · ${n.changed} with changes · ${n.pattern} new pattern · ${n.none} without schedule`, 'Auto-roll ' + PUB.rollDay + ' ' + PUB.rollTime, by || 'System · auto-roll');
+  n.live = pv.filter(x => x.a.live && x.st !== 'none').length;
   emit(); return n;
 }
 function setPub(k, v) { const b = PUB[k]; PUB[k] = v; audit('Schedule', 'Auto-roll setting changed', k, String(b), String(v), ''); emit(); }
@@ -3727,7 +3728,8 @@ const FACTS_BACK = 35, FACTS_AHEAD = 21;
 async function dbSnapshotFacts(accs, force) {
   if (!DB.on || !['Admin','RTA'].includes(W.ME.role)) return; accs = (accs || W.LIVE.accs).filter(x => W.ACC[x]); if (!accs.length) return;
   DB.facts = DB.facts || {};
-  if (!force) { const { data } = await DB.sb.from('wft_facts').select('account_id,captured_at').in('account_id', accs).order('captured_at', { ascending:false }).limit(200);
+  if (!force) { const { data, error } = await DB.sb.from('wft_facts').select('account_id,captured_at').in('account_id', accs).order('captured_at', { ascending:false }).limit(200);
+    if (error) { DB.facts.last = { at:new Date().toLocaleString(), rows:0, accs, err:'snapshot check failed: ' + error.message }; return; }   // never re-save blindly when the check fails
     const today = new Date().toDateString(), done = new Set((data || []).filter(r => new Date(r.captured_at).toDateString() === today).map(r => r.account_id)); accs = accs.filter(x => !done.has(x)); if (!accs.length) return dbFactsInfo(); }
   DB.facts.busy = true; render();
   const rows = W.buildFacts(W.addD(TODAY, -FACTS_BACK), W.addD(TODAY, FACTS_AHEAD), accs).filter(r => (W.AGI[r.person_id] || {}).live).map(r => ({ ...r, captured_by:W.ME.name, captured_at:new Date().toISOString() }));
@@ -3736,7 +3738,7 @@ async function dbSnapshotFacts(accs, force) {
   DB.facts.busy = false; DB.facts.last = { at:new Date().toLocaleString(), rows:ok, accs, err }; if (err) toast('BI snapshot stopped: ' + err); else if (force) toast(`BI snapshot saved · ${ok.toLocaleString()} person-day rows`);
   dbFactsInfo();
 }
-async function dbFactsInfo() { if (!DB.on) return; const { data, count } = await DB.sb.from('wft_facts').select('captured_at', { count:'exact', head:false }).order('captured_at', { ascending:false }).limit(1);
+async function dbFactsInfo() { if (!DB.on) return; const { data, count } = await DB.sb.from('wft_facts').select('captured_at', { count:'estimated', head:false }).order('captured_at', { ascending:false }).limit(1);
   DB.facts = DB.facts || {}; DB.facts.total = count; DB.facts.latest = data && data[0] ? new Date(data[0].captured_at).toLocaleString() : '';
   if (isAdmin()) { const k = await DB.sb.from('wft_settings').select('updated_at').eq('key', 'exportKey').maybeSingle(); DB.exportKeyAt = k.data ? String(k.data.updated_at || '').slice(0, 16).replace('T', ' ') : ''; } render(); }
 function factsCsv() { const rows = W.buildFacts(W.addD(TODAY, -FACTS_BACK), W.addD(TODAY, FACTS_AHEAD), W.ACCOUNTS.map(a => a.id).filter(inScope)); if (!rows.length) return toast('Nothing to export');
@@ -3755,10 +3757,10 @@ async function dbSaveAccTz() { if (!DB.on || !isAdmin()) return; const map = {};
 async function dbSaveRules() { if (!DB.on || !isAdmin()) return; const { error } = await DB.sb.from('wft_settings').upsert({ key:'rules', value:{ grace:W.CFG.grace, lateRule:W.CFG.lateRule }, updated_by:W.ME.name, updated_at:new Date().toISOString() }); toast(error ? 'Rule not saved: ' + error.message : 'Tardiness rule saved for everyone'); }
 W.onCell((a, d) => { if (!DB.on || DB.mute || !a.live) return; DB.dayQ = DB.dayQ.filter(x => !(x.person_id === a.id && x.d === d)); DB.dayQ.push(W.dayRow(a, d)); clearTimeout(DB.dt); DB.dt = setTimeout(dbFlushDays, 800); });
 W.onChangeLog((a, d, x) => { if (!DB.on || DB.mute || !a.live) return;
-  /* a change read from Teams that repeats or undoes the previous Teams change for that person-day is not logged again (the background
-     compare used to re-log the same difference on every refresh) */
-  const h = W.CHG[W.kOf(a.id, d)] || [], prev = h[h.length - 2];
-  if (x.by === 'Shifts' && prev && prev.by === 'Shifts' && prev.kind === x.kind && ((prev.before === x.before && prev.after === x.after) || (prev.before === x.after && prev.after === x.before))) return;
+  /* a change read from Teams that exactly repeats the last change of the same kind for that person-day is not logged again (the background
+     compare used to re-log the same difference on every refresh). A change back (A→B then B→A) is real and is logged. */
+  const h = W.CHG[W.kOf(a.id, d)] || [], prev = h.slice(0, -1).reverse().find(e => e.kind === x.kind);
+  if (x.by === 'Shifts' && prev && prev.by === 'Shifts' && prev.before === x.before && prev.after === x.after) return;
   DB.chgQ.push({ person_id:a.id, account_id:a.acc, d, by_name:x.by, by_role:x.role, kind:x.kind, before:x.before, after:x.after, reason:x.reason, remark:x.remark, source:x.source }); clearTimeout(DB.ct); DB.ct = setTimeout(dbFlushChanges, 800); });
 async function dbFlushDays() {
   if (!DB.on || !DB.peopleOk || !DB.dayQ.length) return; const b = DB.dayQ.splice(0);
@@ -3944,7 +3946,9 @@ function readerCall(body) {
 async function dbReadTeam(accId, cached, opt = {}) {
   const iso = d => d.toISOString().replace(/\.\d+Z$/, 'Z'), DAY = 864e5, t0 = new Date(), base = Date.UTC(t0.getUTCFullYear(), t0.getUTCMonth(), t0.getUTCDate());
   const fullFrom = base - 84 * DAY, cp = cached && cached.payload, reuse = !!(cp && cp.complete && Array.isArray(cp.shifts) && Array.isArray(cp.timeOff) && Date.now() - Date.parse(cp.fullAt || cached.captured_at) < DAY && Date.parse(cp.from) <= fullFrom + 7 * DAY);
-  const partial = !!opt.recent && !reuse, from = opt.history ? fullFrom : reuse || partial ? base - 14 * DAY : fullFrom, to = opt.history ? base - 13 * DAY : base + 35 * DAY, wins = [];
+  /* opt.check = the 60 s Teams check: only yesterday..+36 days (the days it compares), not 17 weeks. Every window ends a day past the
+     compared range so shifts that start late in the last day (account zone vs UTC) are not missed. */
+  const partial = (!!opt.recent && !reuse) || !!opt.check, from = opt.history ? fullFrom : opt.check ? base - DAY : reuse || partial ? base - 14 * DAY : fullFrom, to = opt.history ? base - 13 * DAY : base + 36 * DAY, wins = [];
   for (let s = from; s < to; s += 7 * DAY) wins.push([s, Math.min(s + 8 * DAY, to)]);
   const readWeek = async ([s, e], tries = 2) => {
     try { return await readerCall({action:'readteam',teamId:W.ACC[accId].teamId,winFrom:iso(new Date(s)),winTo:iso(new Date(e))}); }
@@ -3963,9 +3967,8 @@ async function dbReadTeam(accId, cached, opt = {}) {
     timeOff:[...parts.flatMap(p => p.timeOff || []), ...old(cp && cp.timeOff)].filter(x => keep('t' + x.userId + x.start + x.end + x.reasonId)) };
 }
 async function dbReadRequests(accId) {
-  const response = await fetch(CONN.readUrl, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'readrequests',teamId:W.ACC[accId].teamId})});
-  if (!response.ok) throw new Error('Request reader returned ' + response.status);
-  const data = await response.json();
+  const data = await readerCall({action:'readrequests',teamId:W.ACC[accId].teamId});   // same queue and 90 s limit as the shift reads
+  if (!data || typeof data !== 'object') throw new Error('Request reader returned no data');
   if (!Array.isArray(data.requests)) throw new Error('The reader needs the v4 Teams requests update');
   if (data.requests.length >= 5000) throw new Error('Teams requests reached the 5,000-item read limit; check the flow pagination');
   return data;
@@ -3980,7 +3983,7 @@ async function refreshTeamRequests() {
 }
 async function dbShiftsCheck(accId, J, auto = true) {
   const site = ((CONN.pilot || {}).site || {})[accId] || W.LOCNAME[W.ACC[accId].site] || 'Barranquilla';
-  try { J = J || await dbReadTeam(accId); } catch (e) { DB.chk = DB.chk || {}; DB.chk[accId] = { err:e.message, at:new Date().toLocaleTimeString() }; return render(); }
+  try { J = J || await dbReadTeam(accId, null, { check:true }); } catch (e) { DB.chk = DB.chk || {}; DB.chk[accId] = { err:e.message, at:new Date().toLocaleTimeString() }; return render(); }
   await dbSaveTeamCache(accId,J);
   DB.requests = DB.requests || {};
   DB.requestReasons=DB.requestReasons||{}; DB.requestReasons[accId]=J.reasons || [];
@@ -4847,7 +4850,7 @@ const A = {
   npClear: () => { for (let i = 0; i < S.npLen; i++) { $('ns' + i).value = ''; $('ne' + i).value = ''; } },
   swAccept: el => { const act = W.acceptSwap(el.dataset.v); toast(act === 'approve' ? 'Accepted → auto-approved: coverage holds' : act === 'decline' ? 'Accepted → auto-declined: not enough coverage or a rule broken' : act === 'review' ? 'Accepted → sent to review' : 'Accepted → waiting for an RTA'); S.swTab = act === 'review' || !act ? 'Pending approval' : 'Decided'; render(); },
   rollPrev: () => rollDrawer(),
-  rollRun: () => { const n = W.runRoll(W.ME.name); close(); toast(`Published: ${n.roll} repeated, ${n.changed} with changes, ${n.none} without schedule`); render(); },
+  rollRun: () => { const n = W.runRoll(W.ME.name); close(); toast(n.live ? `Next week prepared as drafts for ${n.live} Teams people: review, then Publish drafts to send it` : `Published: ${n.roll} repeated, ${n.changed} with changes, ${n.none} without schedule`); render(); },
   npLen: el => { S.npLen = +el.dataset.v; patternsDrawer(); },
   cDbSave: () => { CONN.dbUrl = $('cDbU').value.trim(); CONN.dbKey = $('cDbK').value.trim(); if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(CONN.dbUrl)) { $('cDbU').focus(); return toast('Use the project URL, e.g. https://xxxx.supabase.co'); } if (!CONN.dbKey) { $('cDbK').focus(); return toast('Paste the anon / public key'); } saveConn(); W.audit('Settings', 'Database connection saved', CONN.dbUrl, '', 'Saved in this browser', ''); toast('Testing connection…'); testDb(); },
   cDbClear: () => { CONN.dbKey = ''; CONN.dbTest = null; saveConn(); W.audit('Settings', 'Database disconnected', CONN.dbUrl, '', 'Sample data only', ''); toast('Key removed from this browser'); render(); },
@@ -4981,7 +4984,7 @@ const A = {
   audPage: el => { S.aud.page += +el.dataset.v; render(); },
   expLate: () => { const to=S.adhP===1?addD(TODAY,-1):TODAY, report=W.adhStats({from:addD(to,-(S.adhP-1)),to,acc:S.acc,lob:S.adhLob,keys:reportKeys(UX.adhStations)});W.ui.csv('late-schedule-comparison.csv',[['Date','Agent','Account','Site','Station','Original start','Current start','First login','Late vs original min','Late vs current min','Current late flag','Schedule changed','Changed at','Changed by','Reason','Original source'],...lateRows(report).map(({a,d,c})=>[d,a.name,W.ACC[a.acc].name,a.site||'',a.station||a.lob,...[c.originalStart,c.currentStart,c.first].map(v=>v==null?'':hm(v)),c.originalLate??'',c.currentLate??'',c.currentLate==null?'':W.isLate(c.currentLate),c.changed,c.changeAt,c.changeBy,c.reason,c.planSource])]);toast('Comparison CSV downloaded'); },
   expAdh: () => { const AR2 = adhRange(), A2 = W.adhStats({ from:AR2.from, to:AR2.to, acc:S.acc, lob:S.adhLob, keys:reportKeys(UX.adhStations) }); W.ui.csv('adherence.csv', [['Agent','ID','Account','LOB','Team lead','Days','Scheduled h','In adherence h','Logged h','Scheduled hours worked %','Total work hours vs schedule %','Late logins','Avg late min','Early logouts','Mid-shift logouts','No login'], ...A2.byAg.map(g => [g.a.name, g.a.id, W.ACC[g.a.acc].name, g.a.lob, g.a.tl, g.days, (g.span / 60).toFixed(2), (g.inA / 60).toFixed(2), (g.log / 60).toFixed(2), g.span ? pct(g.inA, g.span).toFixed(2) : '', g.span ? pct(g.log, g.span).toFixed(2) : '', g.late, g.late ? Math.round(g.lateMin / g.late) : 0, g.early, g.gaps, g.nol])]); toast('CSV downloaded'); },
-  expAbs: () => { const A2 = W.absStats({ from:absRange().from, to:TODAY, acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations) }); W.ui.csv('absenteeism.csv', [['Agent','ID','Account','LOB','Team lead','Scheduled days','Planned days','Unplanned days','Episodes','Bradford','ABS %'], ...A2.byAg.map(g => [g.a.name, g.a.id, W.ACC[g.a.acc].name, g.a.lob, g.a.tl, g.sched, g.pl, g.un, g.ep, g.bradford, pct(g.pl + g.un, g.sched).toFixed(2)])]); toast('CSV downloaded'); },
+  expAbs: () => { const A2 = W.absStats({ from:absRange().from, to:TODAY, acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations) }); W.ui.csv('absenteeism.csv', [['Agent','ID','Account','LOB','Team lead','Scheduled days','Planned days','Unplanned days','Episodes','Bradford','ABS %'], ...A2.byAg.map(g => [g.a.name, g.a.id, W.ACC[g.a.acc].name, g.a.lob, g.a.tl, g.sched, g.pl, g.un, g.ep, g.bradford, (g.sched ? pct(g.pl + g.un, g.sched).toFixed(2) : '')])]); toast('CSV downloaded'); },
   expAud: () => { W.ui.csv('audit-trail.csv', [['When','User','Module','Action','Record','Before','After','Note'], ...W.AUD.slice().sort((a, b) => b.at.localeCompare(a.at)).map(x => [x.at, x.user, x.module, x.action, x.record, x.before, x.after, x.note])]); toast('CSV downloaded'); },
   close
 };
