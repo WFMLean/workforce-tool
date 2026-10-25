@@ -286,6 +286,7 @@ td.bc.today{box-shadow:inset 0 2px 0 var(--acc)}
 .gtop{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .glegend{display:inline-flex;gap:6px;align-items:center;font-size:11px;color:var(--ink3)}.glegend i{width:11px;height:11px;border-radius:2px;display:inline-block;margin-left:8px}
 .lg-brk{background:#5fbf4a}.lg-lun{background:#3c9b30}.lg-busy{background:#f0a23a}.lg-ooo{background:#9b59a6}.lg-cl{background:repeating-linear-gradient(45deg,var(--line2) 0 2px,transparent 2px 5px)}
+.ot-tag{display:inline-block;margin-left:4px;padding:0 5px;border-radius:4px;background:#ad73d0;color:#fff;font-size:10px;font-weight:600;line-height:16px;vertical-align:middle;white-space:nowrap}
 .gwrap{overflow:auto;max-height:640px;border:1px solid var(--line);border-radius:10px;position:relative}
 .ginner{position:relative}
 .grow2{display:flex;align-items:center;height:44px;border-bottom:1px solid var(--line)}
@@ -1493,6 +1494,12 @@ function mergeDayShifts(list) {
   const main=blocks.reduce((a,b)=>!a||b.e-b.s>a.e-a.s?b:a,null);
   return {main,others:blocks.filter(b=>b!==main)};
 }
+/* overtime on a shift day: OT shifts read from Teams (merged into the day) plus activities named OT or Overtime. Minutes; overlaps count once. */
+function otMinutes(a, d) {
+  const s = sched(a, d); if (!s.working) return 0; const o = OV[kOf(a.id, d)] || {}, acts = o.breaks && o.breaksFor === s.code ? o.breaks : [];
+  const iv = [...(s.remoteOT || []), ...acts.filter(b => OT_RX.test(String(b[4] || '')) || b[5] === 'OT').map(b => [b[0], b[1]])].sort((x, y) => x[0] - y[0]);
+  let t = 0, end = -Infinity; iv.forEach(([x, y]) => { if (y <= end) return; t += y - Math.max(x, end); end = y; }); return t;
+}
 const otRows = b => b.ot.map(o => [o[0], o[1], 'activity', true, 'OT', 'OT', 'purple']);
 const keep = (arr, f) => { const k = arr.filter(f); arr.length = 0; arr.push(...k); };
 function dropAgents(accId, preserveReference = false) {
@@ -2198,7 +2205,7 @@ global.WF = {
   sched, baseCode, patOn, shiftLabel, shiftShort, ensureTemplate, patternFromAgent, allocation, setAlloc, login, createUser, setUser, resetPw,
   LOCNAME, LOCF, locOf, setLoc: v => { LOCF.v = v; emit(); }, breakPlan, postBreaks, publishDraft, defaultBreaks, breaksOf, paidMin, ARCHIVE, removeAccount, restoreAccount, inactiveFlags, setInactive, clearInactiveShifts, ROSTERS, importRoster, enrichFromRoster, loginKnown, importLogins, importTimesheet, isProjected, rollPreview, runRoll, setPub, tShort, swapVerdict, processSwap, acceptSwap,
   swapMap, swapCheck, decideSwap, setSwapRule, swapDates,
-  rcode, fullOff, setReason, savePatternTimes, scheduleAudit, whatIf, addAccount,
+  rcode, fullOff, otMinutes, setReason, savePatternTimes, scheduleAudit, whatIf, addAccount,
   diffAgainst, teamsDiff, applyDiff, outList, sendNotify, logins, adh, lateComparison, live, cov, reqCoverage, worst, verdict, absStats, adhStats,
   approve, deny, editCell, assignPattern, publishAll, retry, setCfg, savePattern, audit, absPatterns, buildFacts, setArrival, applySavedArrivals, arrivalOf, onArrival: f => ARR_HOOKS.push(f), isLate, lateRuleText, applyRules, saveTemplate, applySavedTemplates, onTemplate: f => TEMPLATE_HOOKS.push(f),
   onChange: f => listeners.push(f), onAudit: f => AUD_HOOKS.push(f),
@@ -2588,7 +2595,7 @@ function pLive() {
       <div class="seg" role="tablist">${[['attention','Needs attention'],['onshift','On shift'],['upcoming','Upcoming'],['leave','On leave'],['all','All']].map(([k, l]) => `<button role="tab" aria-selected="${S.liveF === k}" class="${S.liveF === k ? 'on' : ''}" data-a="liveF" data-v="${k}">${l}</button>`).join('')}</div></div>
       <div class="tw"><table><thead><tr><th>Agent</th><th>Shift</th><th>Status</th><th style="min-width:320px">Schedule vs login</th><th></th></tr></thead><tbody>
       ${list.map(r => `<tr><td><div class="nm"><a href="#" data-a="person" data-v="${r.a.id}" style="color:inherit">${esc(r.a.name)}</a></div><div class="meta">${esc(lobName(r.a.key))} · TL ${esc(r.a.tl)}</div></td>
-        <td class="nowrap">${r.s.working ? W.ui.shift(r.s.code) + ` <span class="meta num">${W.shiftLabel(r.s.code)}</span>` : '<span class="meta">Not scheduled</span>'}</td>
+        <td class="nowrap">${r.s.working ? W.ui.shift(r.s.code) + ` <span class="meta num">${W.shiftLabel(r.s.code)}</span>` + otTag(r.a, r.s.d) : '<span class="meta">Not scheduled</span>'}</td>
         <td>${stPill(r.st)}<div class="meta">${esc(r.det)}</div></td>
         <td>${r.s.working ? W.ui.timeline(r.s, r.ses, { now: W.accountClock(r.a.acc).clock + (r.d < W.accountClock(r.a.acc).day ? 1440 : 0) }) : ''}</td>
         <td>${['late','nologin','out'].includes(r.st) ? `<button class="btn sm" data-a="logAbs" data-id="${r.a.id}" data-d="${r.d}">Log absence</button>` : ''}</td></tr>`).join('') || `<tr><td colspan="5"><div class="empty">Nobody in this view right now.</div></td></tr>`}
@@ -2605,7 +2612,7 @@ function missingPanel(rows, c) {
   return `<section class="alarm" aria-live="polite"><div class="panel-h"><div class="grow"><h2><span class="pulse"></span>Should be in, not logged in <span class="cntb">${miss.length}</span></h2>
       <p class="sub">Past their start time plus the ${W.CFG.grace}-min grace with no login, or logged out mid-shift. Team leads get a Teams alert automatically after ${W.NOTIFY.tlAlert} min. ${soon ? soon + ' more start in the next 15 min.' : ''}</p></div></div>
     <div class="tw"><table><thead><tr><th>Agent</th><th>Team lead</th><th>Shift</th><th>Missing for</th><th>Status</th><th></th></tr></thead><tbody>
-    ${miss.map(r => `<tr><td><div class="nm">${esc(r.a.name)}</div><div class="meta">${esc(lobName(r.a.key))}</div></td><td>${esc(r.a.tl)}</td><td class="nowrap">${W.ui.shift(r.s.code)} <span class="meta num">${W.shiftLabel(r.s.code)}</span></td>
+    ${miss.map(r => `<tr><td><div class="nm">${esc(r.a.name)}</div><div class="meta">${esc(lobName(r.a.key))}</div></td><td>${esc(r.a.tl)}</td><td class="nowrap">${W.ui.shift(r.s.code)} <span class="meta num">${W.shiftLabel(r.s.code)}</span>${otTag(r.a, r.s.d)}</td>
       <td>${r.mins == null ? '<span class="pill bad">Whole shift</span>' : `<span class="pill ${r.mins >= 30 ? 'bad' : 'warn'}">${dur(r.mins)}</span>${r.mins >= 30 && r.st === 'late' ? '<div class="meta">Possible no-show</div>' : ''}`}</td>
       <td>${stPill(r.st)}</td>
       <td class="nowrap"><a class="btn sm" target="_blank" rel="noopener" href="https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(r.a.email)}">Message</a> <button class="btn sm" data-a="alertTL" data-id="${r.a.id}">Alert TL</button> <button class="btn sm" data-a="logAbs" data-id="${r.a.id}" data-d="${r.d}">Log absence</button></td></tr>`).join('')}
@@ -2668,7 +2675,7 @@ function pSchedule() {
   const ags = W.AG.filter(a => a.key === S.lob && !a.inactive);
   const rows = ags.map(a => `<tr><td><label style="display:flex;align-items:center"><span><span class="nm">${esc(a.name)}</span><div class="meta">${esc(W.PATTERNS[W.patOn(a, S.from).p].name)}</div></span></label></td>
     <td class="offc">${[0, 7].map(o => { const off = range(addD(S.from, o), addD(S.from, o + 6)).filter(d => !W.sched(a, d).working); return `<div>${o ? 'Wk 2' : 'Wk 1'}: <b>${off.length}</b> ${off.map(d => W.DOW[dow(d)]).join(' ') || '—'}</div>`; }).join('')}</td>
-    ${ds.map(d => { const s = W.sched(a, d); return `<td class="cell ${d === TODAY ? 'today' : ''} ${W.isProjected(d, a) ? 'proj' : ''}" data-a="scheduleDetail" data-id="${a.id}" data-d="${d}" tabindex="0" title="${esc(cellTitle(s))}">${s.absence ? abTag(s.absence.reason) : W.ui.shift(s.code)}${(s.remark || s.shiftNote || s.acts.length || (s.absence && s.absence.remark)) ? '<span class="dot"></span>' : ''}${W.PLAN[W.kOf(a.id,d)] && W.PLAN[W.kOf(a.id,d)].code !== s.code ? '<span class="pill warn">Changed</span>' : ''}${(W.CHG[W.kOf(a.id,d)]||[]).some(x=>x.kind==='Activities changed') ? '<span class="pill info">Activities</span>' : ''}${s.swap ? '<span class="chg" title="' + esc(s.swap) + '">⇄</span>' : s.changed ? '<span class="chg">✎</span>' : ''}</td>`; }).join('')}</tr>`).join('');
+    ${ds.map(d => { const s = W.sched(a, d); return `<td class="cell ${d === TODAY ? 'today' : ''} ${W.isProjected(d, a) ? 'proj' : ''}" data-a="scheduleDetail" data-id="${a.id}" data-d="${d}" tabindex="0" title="${esc(cellTitle(s))}">${s.absence ? abTag(s.absence.reason) : W.ui.shift(s.code) + otTag(a, d)}${(s.remark || s.shiftNote || s.acts.length || (s.absence && s.absence.remark)) ? '<span class="dot"></span>' : ''}${W.PLAN[W.kOf(a.id,d)] && W.PLAN[W.kOf(a.id,d)].code !== s.code ? '<span class="pill warn">Changed</span>' : ''}${(W.CHG[W.kOf(a.id,d)]||[]).some(x=>x.kind==='Activities changed') ? '<span class="pill info">Activities</span>' : ''}${s.swap ? '<span class="chg" title="' + esc(s.swap) + '">⇄</span>' : s.changed ? '<span class="chg">✎</span>' : ''}</td>`; }).join('')}</tr>`).join('');
   const covs = ds.map(d => W.cov(S.lob, d)), P = W.PUB, nextRoll = addD(P.until, 1);
   const capA = W.AG.find(x => x.key === S.lob && x.cap), CAPB = capA ? `<span class="pill ok"><i></i>Captured from Shifts time sheet</span><span>Real shifts and clock-ins through <b>${fmtD(capA.cap.last)}</b>. After that, each person’s saved original shifts for ${fmtS(addD(capA.cap.weekEnd, -6))}–${fmtS(capA.cap.weekEnd)} <b>repeat automatically</b> (dashed cells). Later absences and edits stay separate from that saved reference.</span><span class="sp"></span><button class="btn sm" data-a="lgOpen">Import newer time sheet</button>` : '';
   const srcbar = capA ? `<div class="srcbar">${CAPB}</div>` : `<div class="srcbar"><span class="pill ok"><i></i>Schedules read from Teams Shifts</span><span>Last read from Teams <b>${esc(P.captured.slice(11))}</b> · Teams schedule available through <b>${fmtD(P.until)}</b></span>
@@ -2706,7 +2713,10 @@ async function refreshScheduleReads() {
 }
 setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))(S.page === 'requests' ? refreshTeamRequests() : refreshScheduleReads());},60000);
 
-function cellTitle(s) { return `${s.a.name} · ${fmtD(s.d)} · ${s.working ? W.shiftLabel(s.code) : 'Off'}${s.absence ? ' · ' + s.absence.reason + (s.absence.remark ? ': ' + s.absence.remark : '') : ''}${s.acts.map(x => ' · ' + x.type + ' ' + hm(x.s)).join('')}${s.remark ? ' · ' + s.remark : ''}${s.shiftNote ? ' · Internal saved note: ' + s.shiftNote : ''}`; }
+/* OT tag beside a shift: hours of overtime that day (OT shifts from Teams, or an OT / Overtime activity) */
+const otText = m => m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ' ' + m % 60 + 'm' : ''}` : `${m}m`;
+const otTag = (a, d) => { const m = W.otMinutes(a, d); return m ? `<span class="ot-tag" title="Overtime ${otText(m)}">OT ${otText(m)}</span>` : ''; };
+function cellTitle(s) { const ot = W.otMinutes(s.a, s.d); return `${s.a.name} · ${fmtD(s.d)} · ${s.working ? W.shiftLabel(s.code) : 'Off'}${ot ? ' · Overtime ' + otText(ot) : ''}${s.absence ? ' · ' + s.absence.reason + (s.absence.remark ? ': ' + s.absence.remark : '') : ''}${s.acts.map(x => ' · ' + x.type + ' ' + hm(x.s)).join('')}${s.remark ? ' · ' + s.remark : ''}${s.shiftNote ? ' · Internal saved note: ' + s.shiftNote : ''}`; }
 const lastWhy = () => { try { return JSON.parse(localStorage.getItem('wft.lastWhy') || '{}'); } catch (e) { return {}; } };
 const keepWhy = (reason, remark) => { if (!reason) return; try { localStorage.setItem('wft.lastWhy', JSON.stringify({ reason, remark:remark || '' })); } catch (e) {} };
 function cellEditor(id, d) {
@@ -4345,7 +4355,7 @@ function pBuilder() {
   if (!B.tool) B.tool = tpl.find(c => use[c]) || tpl[0];
   const chip = (c, i) => `<button class="bchip ${B.tool === c ? 'on' : ''}" data-a="bTool" data-v="${c}" style="${chipStyle(c)}" title="${c === 'OFF' ? 'Rest day' : W.shiftLabel(c) + (W.SHIFTS[c].saved ? ' · saved by ' + esc(W.SHIFTS[c].by || '') : '')} · key ${i}">${c !== 'OFF' && W.SHIFTS[c].saved ? '★ ' : ''}${c === 'OFF' ? 'Off' : W.shiftLabel(c)}<small>${use[c] || ''}</small><kbd>${i}</kbd></button>`;
   const cell = (a, d) => { const s = W.sched(a, d), c = bCode(a, d), dr = B.draft[bKey(a.id, d)] !== undefined, lock = bLocked(a, d);
-    return `<td class="bc ${dr ? 'dr' : ''} ${lock ? 'lk' : ''} ${d === TODAY ? 'today' : ''}" role="button" tabindex="0" data-id="${a.id}" data-d="${d}" title="${esc(a.name)} · ${fmtD(d)} · ${c === 'OFF' ? 'Off' : W.shiftLabel(c)}${lock ? ' · ' + esc(bReason(a,d)) + ' (locked)' : ''}">${lock ? abTag(bReason(a,d)) : `<span class="bs" style="${chipStyle(c)}">${c === 'OFF' ? esc(bReason(a,d)||'Off · no reason recorded') : W.shiftShort(c)}</span>`}</td>`; };
+    return `<td class="bc ${dr ? 'dr' : ''} ${lock ? 'lk' : ''} ${d === TODAY ? 'today' : ''}" role="button" tabindex="0" data-id="${a.id}" data-d="${d}" title="${esc(a.name)} · ${fmtD(d)} · ${c === 'OFF' ? 'Off' : W.shiftLabel(c)}${lock ? ' · ' + esc(bReason(a,d)) + ' (locked)' : ''}">${lock ? abTag(bReason(a,d)) : `<span class="bs" style="${chipStyle(c)}">${c === 'OFF' ? esc(bReason(a,d)||'Off · no reason recorded') : W.shiftShort(c)}</span>${c === 'OFF' ? '' : otTag(a, d)}`}</td>`; };
   const changesAll = new Set([...Object.keys(B.draft), ...Object.keys(B.brk), ...Object.keys(B.tags)]).size;
   const head = `<div class="head"><div class="grow"><div class="kicker">${B.view === 'day' ? 'Intraday · shifts, breaks and interval staffing' : 'Add shifts · copy · apply patterns · publish'} · times in ${esc([...new Set(B.lobs.map(k => (W.LOB[k] || {}).acc).filter(Boolean))].map(x => W.ACC[x].name + ' ' + W.zoneLabel(W.zoneOf(x)).replace(/ ·.*/, '')).join(' / ') || '')}</div><h1><b>Edit schedules</b></h1><p class="sub">${B.view === 'day' ? 'One day on a timeline: drag shifts and breaks, and watch staffing per 15 minutes.' : 'Pick a shift time, then click or drag across cells to add that shift.'} Changes stay as a draft until you publish.</p></div>
     <div class="seg">${[['day','Day'],['week','Week']].map(([k, l]) => `<button class="${B.view === k ? 'on' : ''}" data-a="bView" data-v="${k}">${l}</button>`).join('')}</div>
@@ -4561,7 +4571,7 @@ function ganttView(ags) {
       const x = W.SHIFTS[code], br = gBreaks(a, d), acts = s.acts || [];
       bar = lock ? `<div class="gbar ooo" style="left:${gX(x.s)}px;width:${gX(x.e)-gX(x.s)}px" title="${esc(bReason(a,d))}${s.absence?.remark ? ' · ' + esc(s.absence.remark) : ''}"><span>${esc(bReason(a,d))}</span></div>`
         : `<div class="gbar ${dr ? 'dr' : ''}" data-g="bar" data-id="${a.id}" style="left:${gX(x.s)}px;width:${gX(x.e) - gX(x.s)}px" title="${W.shiftLabel(code)} · drag to move, drag the edges to resize">
-          <i class="gh l" data-g="l"></i><i class="gh r" data-g="r"></i><span class="gt">${W.shiftLabel(code)}</span>
+          <i class="gh l" data-g="l"></i><i class="gh r" data-g="r"></i><span class="gt">${W.shiftLabel(code)}${otTag(a, d)}</span>
           ${br.map((b, i) => `<b role="button" tabindex="0" aria-label="${esc((b[4]||b[2])+' '+hm(b[0])+' to '+hm(b[1])+'. Press Delete to remove this activity.')}" class="gbk ${b[2]==='activity'?'busy':b[2]}" data-g="brk" data-i="${i}" style="left:${gX(b[0]) - gX(x.s)}px;width:${gX(b[1]) - gX(b[0])}px" title="${esc(b[4] || (b[2] === 'lunch' ? 'Lunch' : 'Break'))} · ${b[3]?'Paid':'Unpaid'} ${W.hm(b[0])}–${W.hm(b[1])} · drag to move"></b>`).join('')}
           </div>`;
     }
@@ -5023,7 +5033,7 @@ const A = {
   rsPerson: el => personView(el.dataset.v),
   rsStation: el => { S.rs.lobs = [el.dataset.v]; S.rs.view = 'people'; S.rs.page = 0; render(); },
   rsCsv: () => { const res = rosterQuery(), days = range(S.rs.ws, addD(S.rs.ws, 6));
-    W.ui.csv(`roster-${TODAY}.csv`, [['Name','Email','Account','Site','Station','Team lead','Supervisor','Position','Status', ...days.map(d => W.DOW[dow(d)] + ' ' + d), 'Flags'], ...res.rows.map(x => { const a = x.a; return [a.name, a.email || '', W.ACC[a.acc].name, W.locOf(a), W.LOB[a.key] ? (W.LOB[a.key].station || W.LOB[a.key].lob) : a.lob, x.lead, x.sup, a.position || '', a.inactive ? 'Inactive' : 'Active', ...days.map(d => { const s = W.sched(a, d); return !s.working ? 'Off' : s.absence ? s.absence.reason : W.shiftLabel(s.code); }), x.flags.map(f => f[0]).join('; ')]; })]); },
+    W.ui.csv(`roster-${TODAY}.csv`, [['Name','Email','Account','Site','Station','Team lead','Supervisor','Position','Status', ...days.map(d => W.DOW[dow(d)] + ' ' + d), 'Flags'], ...res.rows.map(x => { const a = x.a; return [a.name, a.email || '', W.ACC[a.acc].name, W.locOf(a), W.LOB[a.key] ? (W.LOB[a.key].station || W.LOB[a.key].lob) : a.lob, x.lead, x.sup, a.position || '', a.inactive ? 'Inactive' : 'Active', ...days.map(d => { const s = W.sched(a, d); const ot = W.otMinutes(a, d); return !s.working ? 'Off' : s.absence ? s.absence.reason : W.shiftLabel(s.code) + (ot ? ' (OT ' + otText(ot) + ')' : ''); }), x.flags.map(f => f[0]).join('; ')]; })]); },
   pvWeek: el => { const o = +el.dataset.v; S.pv.from = addD(weekStart(TODAY), o); S.pv.to = addD(S.pv.from, 6); S.pv.page = 0; render(); },
   arrOpen: el => arrivalDrawer(el.dataset.id, el.dataset.d),
   arrQuick: el => { const i = $('arEta'), m = +i.dataset.s + +el.dataset.v; i.value = hm(m); },
