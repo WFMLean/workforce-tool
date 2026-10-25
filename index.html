@@ -1561,6 +1561,10 @@ function regroup(accId) {              // re-key the account's people by roster 
 }
 /* ---------- master roster (SharePoint "Active Roster" table) ---------- */
 const ROSTERS = {};
+/* roster-only people (on the roster, not in Shifts) get an id from their email, else their name, so the same person keeps the same id
+   in every session. The old ids used a running count, which changed each sign-in and was reused for other people. */
+const idHash = t => { let a = 5381, b = 52711; for (const ch of t) { const c = ch.charCodeAt(0); a = (Math.imul(a, 33) ^ c) >>> 0; b = (Math.imul(b, 31) + c) >>> 0; } return a.toString(36) + b.toString(36); };
+const rosterOnlyId = (accId, r) => accId + '-RO-' + idHash(String(r.email || '').trim().toLowerCase() || nameKey(r.name));
 const nameToks = n => nameKey(n).split(' ').filter(Boolean);
 function rosterMatch(R, name) {
   const k = nameKey(name); if (R.byName[k]) return R.byName[k];
@@ -1583,19 +1587,19 @@ function enrichFromRoster(accId) {
   R.rows.filter(r => r.hcStatus === 'In HC' && !used.has(r)).forEach(r => st.notInShifts.push({ name: r.name, site: r.site, division: r.division }));
   /* roster is the headcount source: people In HC but not in Shifts still count, with no schedule (Schedule audit flags them) */
   const have = new Set(AG.filter(x => x.acc === accId).map(x => nameKey(x.name)));
-  if (AG.some(x => x.acc === accId && x.cap)) st.notInShifts.forEach(x => { if (have.has(nameKey(x.name))) return; const r = R.byName[nameKey(x.name)]; const a = { id: accId + '-N' + String(AG.length).padStart(4, '0'), name: r.name, acc: accId, site: r.site, lob: 'tmp', key: accId + '|tmp', tl: r.tl || '—', email: r.email || '', sup: r.sup, division: r.division, station: rosterStation(r), position: r.position, hcStatus: r.hcStatus, rosterRow: r, live:LIVE.on, pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], lateP: 0, absP: 0, real: true, notInShifts: true }; AG.push(a); AGI[a.id] = a; });
+  if (AG.some(x => x.acc === accId && x.cap)) st.notInShifts.forEach(x => { if (have.has(nameKey(x.name))) return; const r = R.byName[nameKey(x.name)], id = rosterOnlyId(accId, r); if (AGI[id]) return; have.add(nameKey(x.name)); const a = { id, name: r.name, acc: accId, site: r.site, lob: 'tmp', key: accId + '|tmp', tl: r.tl || '—', email: r.email || '', sup: r.sup, division: r.division, station: rosterStation(r), position: r.position, hcStatus: r.hcStatus, rosterRow: r, live:LIVE.on, pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], lateP: 0, absP: 0, real: true, notInShifts: true }; AG.push(a); AGI[a.id] = a; });
   R.stats = st; regroup(accId); return st;
 }
-function importRoster(rows, accId, file) {    // rows: {name, email, status, hcStatus, site, division, station, subAccount, position, shift, tl, sup, ssup, mgr}
+function importRoster(rows, accId, file, quiet) {    // rows: {name, email, status, hcStatus, site, division, station, subAccount, position, shift, tl, sup, ssup, mgr}
   const R = ROSTERS[accId] = { rows, file, at: stamp(), byName: {} };
   rows.forEach(r => { R.byName[nameKey(r.name)] = r; });
   const captured = AG.some(a => a.acc === accId && a.cap);
   if (!captured) {                       // no Shifts data yet: the roster becomes the people list (LOB = division) with no schedule
     dropAgents(accId); let n = 0;
-    rows.filter(r => r.hcStatus === 'In HC').forEach(r => { const lid = lobIdFor(r.site, rosterStation(r)); const a = { id: accId + '-R' + String(++n).padStart(3, '0'), name: r.name, acc: accId, site: r.site, lob: lid, key: accId + '|' + lid, tl: r.tl || '—', email: r.email || '', pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], lateP: 0, absP: 0, real: true, live:LIVE.on, rosterRow:r, station:rosterStation(r), position:r.position, hcStatus:r.hcStatus, isNew: true }; AG.push(a); AGI[a.id] = a; });
+    rows.filter(r => r.hcStatus === 'In HC').forEach(r => { const lid = lobIdFor(r.site, rosterStation(r)), id = rosterOnlyId(accId, r); if (AGI[id]) return; n++; const a = { id, rosterOnly: true, name: r.name, acc: accId, site: r.site, lob: lid, key: accId + '|' + lid, tl: r.tl || '—', email: r.email || '', pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], lateP: 0, absP: 0, real: true, live:LIVE.on, rosterRow:r, station:rosterStation(r), position:r.position, hcStatus:r.hcStatus, isNew: true }; AG.push(a); AGI[a.id] = a; });
   }
   const st = enrichFromRoster(accId), inhc = rows.filter(r => r.hcStatus === 'In HC').length;
-  audit('Roster', 'Master roster imported', file, '', `${inhc} In HC · ${rows.length - inhc} termed · ${st.matched} matched to Shifts people`, captured ? `${st.termedScheduled.length} termed still scheduled · ${st.notInShifts.length} In HC not in Shifts` : 'No Shifts schedule yet: people listed with no pattern', ME.name);
+  if (!quiet) audit('Roster', 'Master roster imported', file, '', `${inhc} In HC · ${rows.length - inhc} termed · ${st.matched} matched to Shifts people`, captured ? `${st.termedScheduled.length} termed still scheduled · ${st.notInShifts.length} In HC not in Shifts` : 'No Shifts schedule yet: people listed with no pattern', ME.name);
   emit(); return { file, acc: accId, inhc, termed: rows.length - inhc, captured, ...st };
 }
 let rec_last_clock = '';
@@ -3789,15 +3793,18 @@ async function dbLoadLive(p) {
   await loadBalances();
   const ar = await DB.sb.from('wft_arrivals').select('*').gte('d', W.addD(TODAY, -2)); W.applySavedArrivals(ar.data);   // after every account's people exist
   DB.mute = false;
-  const rosterSaved=await dbReadAll(()=>DB.sb.from('wft_people').select('name,email,site,station,team_lead,supervisor,position,hc_status,account_id').eq('source','Master roster').order('id')).catch(e=>({error:e,data:[]}));
-  if(rosterSaved.error)DB.rosterError=rosterSaved.error.message;else for(const acc of [...new Set((rosterSaved.data||[]).map(r=>r.account_id))])W.importRoster(rosterSaved.data.filter(r=>r.account_id===acc).map(r=>({name:r.name,email:r.email,site:r.site,station:r.station,teamLead:r.team_lead,tl:r.team_lead,sup:r.supervisor,position:r.position,hcStatus:r.hc_status})),acc,'Saved master roster');
+  /* the roster is the last imported file, saved as it was (wft_settings 'roster:<account>'). It used to be rebuilt from people rows,
+     which drifted every sign-in until almost nobody matched. */
+  const rosterSaved=await DB.sb.from('wft_settings').select('key,value').like('key','roster:%').then(r=>r,e=>({error:e}));
+  if(rosterSaved.error)DB.rosterError=rosterSaved.error.message;
+  else (rosterSaved.data||[]).forEach(x=>{const acc=x.key.slice(7),v=x.value||{};if(W.ACC[acc]&&Array.isArray(v.rows)&&v.rows.length)W.importRoster(v.rows,acc,v.file||'Saved master roster',true);});
   if (['Admin','RTA','Team lead'].includes(p.role)) await dbSyncPeople();     // needed before days can be saved (people are the parent rows)
   dbProcessDrops(); dbFactsInfo();
   dbLoadTeams(p);
   setTimeout(() => dbSnapshotFacts(W.LIVE.accs.filter(x => !readAccs().includes(x))), 4000);   // Crane (portal feed); Shifts-read accounts snapshot after they load                                    // accounts read straight from Shifts (OnTrac, Riverstone…), in the background
 }
 async function dbSyncPeople() {
-  const rows = W.AG.filter(a => a.live).map(a => ({ id:a.id, account_id:a.acc, name:a.name, email:a.email || null, site:a.site, station:a.station, lob_key:a.key, team_lead:(a.rosterRow || {}).teamLead || null, supervisor:(a.rosterRow || {}).sup || null, position:a.position || null, hc_status:a.hcStatus, inactive:!!a.inactive, inactive_why:a.inactiveWhy || null, source:a.manualInactive ? 'Workforce Tool' : a.rosterRow ? 'Master roster' : a.fromShifts ? 'Shifts (reader)' : 'Crane portal roster', updated_at:new Date().toISOString() }));
+  const rows = W.AG.filter(a => a.live).map(a => ({ id:a.id, account_id:a.acc, name:a.name, email:a.email || null, site:a.site, station:a.station, lob_key:a.key, team_lead:(a.rosterRow || {}).teamLead || null, supervisor:(a.rosterRow || {}).sup || null, position:a.position || null, hc_status:a.hcStatus, inactive:!!a.inactive, inactive_why:a.inactiveWhy || null, source:a.manualInactive ? 'Workforce Tool' : a.notInShifts || a.rosterOnly ? 'Roster only' : a.rosterRow ? 'Master roster' : a.fromShifts ? 'Shifts (reader)' : 'Crane portal roster', updated_at:new Date().toISOString() }));
   for (let i = 0; i < rows.length; i += 500) { const { error } = await DB.sb.from('wft_people').upsert(rows.slice(i, i + 500)); if (error) { DB.err = error.message; console.warn('people sync', error.message); return false; } }
   DB.peopleOk = true; if (DB.dayQ.length) dbFlushDays(); return true;
 }
@@ -5287,7 +5294,9 @@ function readRoster(f) {
         if (rr.length && 'HC Status' in rr[0] && 'Name' in rr[0]) {
           const rows = rr.filter(r => na(r['Name'])).map(r => ({ name:na(r['Name']), email:na(r['LSG email']).toLowerCase(), status:na(r['Status']), hcStatus:na(r['HC Status']), site:na(r['LSG Branch']), division:na(r['Division']), station:na(r['Station/Team']), subAccount:na(r['Sub Account']), position:na(r['Position']), tl:na(r['Team Lead']) || na(r['Supervisor']), teamLead:na(r['Team Lead']), sup:na(r['Supervisor']), ssup:na(r['Sr Supervisor']), mgr:na(r['LSG Manager']) || na(r['CWW Manager']) }));
           S.rosterRes = W.importRoster(rows, $('rosterAcc') ? $('rosterAcc').value : 'CRN', f.name); S.rosterDiff = null; S.upInfo = '';
-          if(DB.on){const saved=await dbSyncPeople();if(!saved){toast('Roster mapped in this session, but not saved: '+DB.err);return render();}}
+          if(DB.on){const acc=$('rosterAcc') ? $('rosterAcc').value : 'CRN',{error:re}=await DB.sb.from('wft_settings').upsert({key:'roster:'+acc,value:{file:f.name,at:new Date().toISOString(),by:W.ME.name,rows},updated_by:W.ME.name,updated_at:new Date().toISOString()});
+            if(re){toast('Roster mapped in this session, but the file was not saved: '+re.message);return render();}
+            const saved=await dbSyncPeople();if(!saved){toast('Roster saved, but people were not updated: '+DB.err);return render();}}
           toast(`${S.rosterRes.inhc} In HC imported · ${S.rosterRes.matched} matched to Shifts`); return render();
         }
       }
