@@ -3644,7 +3644,7 @@ function rollDrawer() {
 }
 /* ---------- CONNECTIONS (same wiring as the live Crane PTO Portal) ---------- */
 const CONN = (() => { const cfg = window.WFT_CONFIG || {}, withCfg = c => { ['dbUrl','dbKey'].forEach(k => { if (cfg[k] && !/PASTE_/.test(cfg[k])) c[k] = cfg[k]; }); c.standalone=cfg.standalone===true; if(cfg.flowUrl&&!c.flowUrl)c.flowUrl=cfg.flowUrl; return c; }; const d = { inUrl:'', toWindow:'allday', theme:'Purple', inTest:null, dbUrl:'https://xrzpbkilkswyflzagcfw.supabase.co', dbKey:'', flowUrl:'', autoSend:true, teams:{ CRN:'7fd45419-003c-4a9f-b2c3-1b88c7b65702', ONT:'c6cb7bb2-8512-483d-8c67-fecbecf31ed2', RIV:'a1f3c21e-3bb2-4794-8ab9-bb83a350f613' }, dbTest:null, flowTest:null };
-  try { const s = JSON.parse(localStorage.getItem('wft.conn') || '{}'); delete s.flowUrl; delete s.pubUrl; delete s.readUrl; const t = { ...d.teams }; Object.entries(s.teams || {}).forEach(([k, v]) => { if (v) t[k] = v; }); return withCfg({ ...d, ...s, teams:t, dbTest:null, flowTest:null }); } catch (e) { return withCfg({ ...d }); } })();
+  try { const s = JSON.parse(localStorage.getItem('wft.conn') || '{}'); if ('flowUrl' in s || 'pubUrl' in s || 'readUrl' in s) { delete s.flowUrl; delete s.pubUrl; delete s.readUrl; localStorage.setItem('wft.conn', JSON.stringify(s)); } /* flow links cached by older builds are wiped from this browser on load */ const t = { ...d.teams }; Object.entries(s.teams || {}).forEach(([k, v]) => { if (v) t[k] = v; }); return withCfg({ ...d, ...s, teams:t, dbTest:null, flowTest:null }); } catch (e) { return withCfg({ ...d }); } })();
 (() => {   // Shifts team mapping: saved rows win; older saves only had one team ID per account
   if (Array.isArray(CONN.teamMap) && CONN.teamMap.length) W.TEAM_MAP.splice(0, W.TEAM_MAP.length, ...CONN.teamMap.filter(r => r && r.acc && r.id));
   else Object.entries(CONN.teams || {}).forEach(([acc, id]) => { const r = W.TEAM_MAP.find(x => x.acc === acc && x.site === '*' && x.station === '*'); if (r && W.parseTeamId(id)) r.teamId = W.parseTeamId(id); });
@@ -4610,7 +4610,7 @@ function timelineEdgeSpeed(pointer,left,right){const edge=60;if(pointer>right-ed
 function previewTimelineDrag(){
  const o=G.op,w=$('gwrap');if(!o||!w)return;
  const raw=Math.round((o.pointerX-o.x0+w.scrollLeft-o.scroll0)/GPX*60/15)*15;
- const dm=o.kind==='bar'?Math.max(GH0*60-o.s,Math.min(GH1*60-o.e,1425-o.s,raw)):raw;   // a shift must start on its own day (by 23:45); later starts belong to the next dayif(dm)o.moved=true;
+ const dm=o.kind==='bar'?Math.max(GH0*60-o.s,Math.min(GH1*60-o.e,1425-o.s,raw)):raw;/* a shift must start on its own day (by 23:45); later starts belong to the next day */if(dm)o.moved=true;
  let s2=o.s,e2=o.e;
  if(o.kind==='bar'){s2+=dm;e2+=dm;}else if(o.kind==='l')s2=Math.max(GH0*60,Math.min(o.e-120,1425,o.s+dm));else if(o.kind==='r')e2=Math.min(GH1*60,Math.max(o.s+120,o.e+dm));
  if(o.kind==='brk'){const b=o.br[o.i],length=b[1]-b[0],start=Math.max(o.s,Math.min(o.e-length,b[0]+dm)),el=o.bar.querySelector(`[data-i="${o.i}"]`);el.style.left=(gX(start)-gX(o.s))+'px';o.nb=[start,start+length];return;}
