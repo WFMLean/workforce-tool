@@ -467,7 +467,7 @@ h1,.drawer header h2{font-family:var(--sans);letter-spacing:-.025em}h1{font-size
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div class="cmdk" id="cmdk" data-a="cmdClose"><div class="box" role="dialog" aria-modal="true" aria-label="Search"><input id="cmdQ" placeholder="Search people, stations or pages…" autocomplete="off" aria-label="Search"><button class="btn sm" style="margin:8px 16px" data-a="cmdClose">Close search</button><div class="res" id="cmdR"></div></div></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.min.js"></script>
 <script src="config.js"></script>
 <script>
 /* =====================================================================
@@ -864,6 +864,8 @@ function floorInstant() {
   return wall - zoneOffAt(WFc.zone, first) * 60000;
 }
 function accountClock(acc) { return clockInZone(zoneOf(acc), floorInstant()); }
+// today in the person's account, not the browser: a Manila browser editing Crane, or a tab left open past midnight, still sends the right days
+const accDay = a => { try { return accountClock(a.acc).day; } catch (e) { return TODAY; } };
 const limitFor = (d, a) => {
   let f = WFc; try { if (a) f = accountClock(a.acc); } catch(e) { /* reference data bootstraps before zone settings */ }
   return d === f.day ? f.clock : d === addD(f.day,-1) ? f.clock + 1440 : d < f.day ? Infinity : -Infinity;
@@ -884,7 +886,7 @@ const LOGIN_DATA = {}, LOGIN_COVER = new Set(), LOGIN_IMPORTS = [];
 const nameKey = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]+/g, ' ').trim();
 function importLogins(rows, file) {             // rows: {id?, email?, name?, start: Date, end: Date|null}
   const byE = {}, byN = {}; AG.forEach(a => { byE[a.email.toLowerCase()] = a; byN[nameKey(a.name)] = a; });
-  const un = {}, keys = new Set(); let matched = 0, from = '9999', to = '0000';
+  const un = {}, keys = new Set(), halves = new Set(); let matched = 0, from = '9999', to = '0000';
   rows.forEach(r => {
     const a = (r.id && AGI[String(r.id).trim()]) || (r.email && byE[String(r.email).trim().toLowerCase()]) || (r.name && byN[nameKey(r.name)]);
     if (!a || !(r.start instanceof Date) || isNaN(r.start)) { const w = r.email || r.name || r.id || '(blank)'; un[w] = (un[w] || 0) + 1; return; }
@@ -892,7 +894,11 @@ function importLogins(rows, file) {             // rows: {id?, email?, name?, st
     const prev = sched(a, addD(d, -1));                    // a login after midnight that belongs to last night's shift
     if (prev.working && prev.e > 1440 && i < prev.e - 1440 + 120 && !(sched(a, d).working && i >= sched(a, d).s - 120)) { d = addD(d, -1); i += 1440; }
     let o = r.end instanceof Date && !isNaN(r.end) ? i + Math.round((r.end - r.start) / 60000) : i + 1;
-    const k = kOf(a.id, d); (LOGIN_DATA[k] = keys.has(k) ? LOGIN_DATA[k] : []).push([i, Math.max(i + 1, o)]); keys.add(k);
+    const k = kOf(a.id, d), half = k + (i >= 1440 ? '|n' : '|d');
+    /* a file replaces the sessions it covers: the evening part (before midnight) or the after-midnight part of a night shift.
+       The next day's file therefore adds the 01:10–06:30 part of last night instead of wiping the 21:58 login. */
+    if (!halves.has(half)) { LOGIN_DATA[k] = (LOGIN_DATA[k] || []).filter(x => (x[0] >= 1440) !== (i >= 1440)); halves.add(half); }
+    LOGIN_DATA[k].push([i, Math.max(i + 1, o)]); keys.add(k);
     LOGIN_COVER.add(a.acc + '|' + d); matched++; if (d < from) from = d; if (d > to) to = d;
   });
   keys.forEach(k => { const v = LOGIN_DATA[k].sort((x, y) => x[0] - y[0]), m = []; v.forEach(x => { const l = m[m.length - 1]; if (l && x[0] <= l[1] + 1) l[1] = Math.max(l[1], x[1]); else m.push(x.slice()); }); LOGIN_DATA[k] = m; });
@@ -931,10 +937,11 @@ function lateComparison(a, d, first = null) {
 function adh(a, d) {
   const s = sched(a, d); if (!s.working || fullOff(s) || !loginKnown(a, d)) return null;
   const lim = limitFor(d, a); if (lim <= s.s) return null;
-  const end = Math.min(s.e, lim), span = end - s.s, ses = logins(a, d);
-  let inA = 0; ses.forEach(x => inA += Math.max(0, Math.min(x.o, end) - Math.max(x.i, s.s)));
+  const end = Math.min(s.e, lim), seg = workSegments(s, end), ses = logins(a, d); if (!seg.length) return null;
+  const span = seg.reduce((t, [x, y]) => t + y - x, 0), s0 = seg[0][0], e0 = workSegments(s, s.e).slice(-1)[0]?.[1] ?? s.e;
+  let inA = 0; ses.forEach(x => seg.forEach(([p, q]) => inA += Math.max(0, Math.min(x.o, q) - Math.max(x.i, p))));
   const first = ses.length ? ses[0].i : null, last = ses.length ? ses[ses.length - 1] : null, ended = lim >= s.e;
-  const late = first == null ? null : Math.max(0, first - s.s), early = ended && last && !last.open ? Math.max(0, s.e - last.o) : 0;
+  const late = first == null ? null : Math.max(0, first - s0), early = ended && last && !last.open ? Math.max(0, e0 - last.o) : 0;
   const log = ses.reduce((t, x) => t + Math.max(0, x.o - x.i), 0);              // every logged minute that shift day (in or outside the shift)
   return { s, ses, span, inA, log, conf: span ? log / span * 100 : null, pct: span ? inA / span * 100 : null, first, comparison:lateComparison(a,d,first), late, lateFlag: isLate(late),
     early, earlyFlag: early > CFG.grace, noLogin: !ses.length, ended, gaps: Math.max(0, ses.length - 1) };
@@ -967,8 +974,11 @@ function live() {
 
 /* ---------- coverage ---------- */
 const pendingOn = (id, d, exceptReq) => REQ.some(r => r.status === 'Pending' && r.agent === id && r.id !== exceptReq && r.dates.includes(d));
-const workHours = (s, d) => { const out = []; if (!s.working || fullOff(s)) return out; for (let h = 0; h < 24; h++) { const m = h * 60 + 30; if (m >= s.s && m < Math.min(s.e, 1440)) out.push(h); } return out; };
-const spillHours = (s) => { const out = []; if (!s.working || fullOff(s) || s.e <= 1440) return out; for (let h = 0; h < 24; h++) if (h * 60 + 30 + 1440 < s.e) out.push(h); return out; };
+/* part-day leave (absence.win, shift minutes) is not work time: it is left out of hourly staffing, the adherence span and the late baseline */
+const inLeave = (s, m) => !!(s.absence && s.absence.win && s.absence.win.some(([x, y]) => m >= x && m < y));
+function workSegments(s, end) { let seg = [[s.s, end]]; ((s.absence && s.absence.win) || []).forEach(([x, y]) => { seg = seg.flatMap(([a, b]) => y <= a || x >= b ? [[a, b]] : [[a, x], [y, b]].filter(([p, q]) => q > p)); }); return seg; }
+const workHours = (s, d) => { const out = []; if (!s.working || fullOff(s)) return out; for (let h = 0; h < 24; h++) { const m = h * 60 + 30; if (m >= s.s && m < Math.min(s.e, 1440) && !inLeave(s, m)) out.push(h); } return out; };
+const spillHours = (s) => { const out = []; if (!s.working || fullOff(s) || s.e <= 1440) return out; for (let h = 0; h < 24; h++) if (h * 60 + 30 + 1440 < s.e && !inLeave(s, h * 60 + 30 + 1440)) out.push(h); return out; };
 function cov(key, d, opt = {}) {
   const l = LOB[key], ags = AG.filter(a => a.key === key && !a.inactive), y = addD(d, -1);
   let base = 0, sch = 0, off = 0, pend = 0; const hr = Array(24).fill(0), open = Array(24).fill(false), reasons = {};
@@ -988,11 +998,12 @@ function reqCoverage(r) {
   const a = AGI[r.agent];
   return r.dates.map(d => {
     const c = cov(a.key, d, { req: r.id }), s = sched(a, d), mine = r.status === 'Approved' ? [] : workHours(s, d);
-    const after = r.status === 'Approved' ? c.avail - c.pend : c.avail - c.pend - 1;
+    const takes = r.status !== 'Approved' && s.working && !fullOff(s) ? 1 : 0;      // a requested day the person is not working removes nobody
+    const after = c.avail - c.pend - takes;
     const hrAfter = c.hr.map((v, h) => v - (mine.includes(h) ? 1 : 0));
     const lowHours = hrAfter.map((v, h) => c.open[h] && v < c.minInt ? h : -1).filter(h => h >= 0);
     let v = verdict(after, c.req); if (v === 'ok' && lowHours.length) v = 'tight';   // daily OK but some intervals under minimum
-    const al = allocation(a.key, d, r.id), allocAfter = al.left - (r.status === 'Approved' ? 0 : 1);
+    const al = allocation(a.key, d, r.id), allocAfter = al.left - takes;
     return { ...c, shift: s.code, after, hrAfter, lowHours, v, al, allocAfter };
   });
 }
@@ -1041,7 +1052,7 @@ function editCell(id, d, ch) {
   if ((before.absence || {}).reason !== (after.absence || {}).reason) logChange(a, d, after.absence ? { kind: 'Absence', before: planLabel(after.code), after: 'Off · ' + after.absence.reason, reason: after.absence.reason, remark: after.absence.remark, source: 'Schedule' } : { kind: 'Absence removed', before: before.absence.reason, after: planLabel(after.code), reason: ch.reason || '', remark: ch.remark || '', source: 'Schedule' });
   const shiftSent = 'breaks' in ch || before.code !== after.code || !!ch.act || 'clearActs' in ch || noteChanged || (before.absence || {}).reason !== (after.absence || {}).reason;
   if (what.length) cellChanged(a, d, ch.fromShifts);
-  if (what.length && shiftSent && d >= TODAY && !ch.fromShifts) queueSync(a, after.absence ? 'Create time off' : before.code === after.code && noteChanged ? 'Update shift note' : 'Replace shift', [d], after.absence ? 'schedule/timesOff' : 'schedule/shifts', null, null, !after.absence && after.working ? { notes: after.shiftNote } : null);
+  if (what.length && shiftSent && d >= accDay(a) && !ch.fromShifts) queueSync(a, after.absence ? 'Create time off' : before.code === after.code && noteChanged ? 'Update shift note' : 'Replace shift', [d], after.absence ? 'schedule/timesOff' : 'schedule/shifts', null, null, !after.absence && after.working ? { notes: after.shiftNote } : null);
   emit();
   return what.length;
 }
@@ -1354,13 +1365,13 @@ function publishDraft(changes, note, reason, remark, shiftNote) {        // chan
   changes.forEach(c=>{const a=AGI[c.id];if(a){const code=c.code??sched(a,c.d).code;try{validateActivities(code==='OFF'?[]:(c.breaks??breaksOf(a,c.d,code)),code);}catch(e){throw Error(a.name+' · '+c.d+': '+e.message);}}});
   const byA = {};
   changes.forEach(c => { const a = AGI[c.id]; if (!a) return; const beforeState=sched(a,c.d), before = beforeState.code, oldActivities=breaksOf(a,c.d,before), o = OV[kOf(c.id, c.d)] || (OV[kOf(c.id, c.d)] = {}); const code = c.code ?? before; if (code === baseCode(a, c.d)) delete o.code; else o.code = code; if(code!=='OFF' && c.tag===undefined)delete o.rest; if (c.breaks) { o.breaks = validateActivities(c.breaks,code); o.breaksFor = code; o.acts=[]; audit('Schedule','Shift activities updated',a.name+' · '+c.d,activityText(oldActivities),activityText(o.breaks),'Names, times, colours, codes and paid flags'); } if(c.tag!==undefined){if(Number.isFinite(c.dayStart)&&Number.isFinite(c.dayEnd)&&c.dayEnd>c.dayStart){o.restStart=c.dayStart;o.restEnd=c.dayEnd;}const r=RCFG[c.tag];if(r?.rest){o.rest=c.tag;delete o.absence;}else{delete o.rest;if(r)o.absence={reason:c.tag,remark:remark||'',source:c.fullDay===true?'Workforce Tool · whole day':'Workforce Tool',fullDay:c.fullDay===true,by:ME.name,at:stamp()};else delete o.absence;}logChange(a,c.d,{kind:'Day status',before:beforeState.rest||cellText(beforeState),after:c.tag||'Working day',reason:c.tag||'Working day',source:'Edit schedules'});}
-    if (before !== code || c.breaks || c.tag!==undefined) (byA[c.id] = byA[c.id] || []).push([c.d, before, code, !!c.breaks, before !== code,c.tag!==undefined]);
+    if (before !== code || c.breaks || c.tag!==undefined) (byA[c.id] = byA[c.id] || []).push([c.d, before, code, !!c.breaks, before !== code, c.tag!==undefined && !!RCFG[c.tag]]);   // only absence/rest reasons stay tool-only; Normal Off and Working day publish
     if (before !== code && shiftNote && code !== 'OFF') o.shiftNote = String(shiftNote).slice(0, 500);
     if (before !== code && c.swap) o.swap = { with: c.swap }; else if (before !== code) delete o.swap;
     if (before !== code) logChange(a, c.d, c.swap ? { kind: 'Swap', before: planLabel(before), after: planLabel(code), reason: reason || 'Shift swap', remark: [c.swap, remark].filter(Boolean).join(' · '), source: note || 'Schedule manager' } : { kind: 'Shift change', before: planLabel(before), after: planLabel(code), reason: reason || '', remark: remark || '', source: note || 'Schedule manager' }); });
   Object.entries(byA).forEach(([id, l]) => { const a = AGI[id]; l.sort((x, y) => x[0].localeCompare(y[0]));
     audit('Schedule', 'Schedule published', a.name, l.map(x => fmtS(x[0]) + ' ' + shiftLabel(x[1])).join('; '), l.map(x => fmtS(x[0]) + ' ' + shiftLabel(x[2]) + (x[3] ? ' (breaks moved)' : '')).join('; '), (note || 'Schedule manager') + (reason ? ' · ' + reason : '') + (remark ? ' · ' + remark : '') + (l.some(x => x[3]) ? ' · activities included in Shifts publishing (flow v3 required)' : ''));
-    const sh = l.filter(x => !x[5] && (x[4] || x[3]) && x[0] >= TODAY);     // Activity-only edits must replace the shift too.
+    const sh = l.filter(x => !x[5] && (x[4] || x[3]) && x[0] >= accDay(a));     // Activity-only edits must replace the shift too.
     l.forEach(x => cellChanged(a, x[0]));
     if (sh.length) queueSync(a, `Publish ${sh.length} shift${sh.length > 1 ? 's' : ''} (start/end${shiftNote ? ' + note' : ''})`, sh.map(x => x[0]), 'schedule/shifts (batch)', null, null, shiftNote ? { notes: String(shiftNote).slice(0, 500) } : null); });
   emit(); const all = Object.values(byA).flat();
@@ -1698,8 +1709,8 @@ function loadLiveTeam(accId, J, opt = {}) {
   setLobs(accId, G);
   const local = iso => toZoneLocal(accId, iso);     // shifts arrive in UTC: shown in the account (Shifts team) time zone
   const codes = {}, days = [], perDay = {}, rest = {}, imported = {}, tagged = {};
-  (J.shifts || []).forEach(s => { if (!s.start || !s.end || !stOf[s.userId]) return; const [d, m] = local(s.start), dur = Math.round((new Date(s.end) - new Date(s.start)) / 6e4); if (dur <= 0) return;
-    ((perDay[s.userId] = perDay[s.userId] || {})[d] = perDay[s.userId][d] || []).push({ s: m, e: m + dur, label: s.label, notes: s.notes, activities: readShiftActivities(accId,d,s.activities) }); });
+  (J.shifts || []).forEach(s => { if (!s.start || !s.end || !stOf[s.userId]) return; const [d, m] = local(s.start), [de, me] = local(s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;   // end read on the wall clock, so a night shift across a DST change keeps its 06:00 end
+    ((perDay[s.userId] = perDay[s.userId] || {})[d] = perDay[s.userId][d] || []).push({ s: m, e, label: s.label, notes: s.notes, activities: readShiftActivities(accId,d,s.activities) }); });
   Object.entries(perDay).forEach(([id, byD]) => Object.entries(byD).forEach(([d, list]) => { const { main, others } = mergeDayShifts(list);
     (imported[id]=imported[id]||{})[d]={main,others};
     const rs=tsName(main.parts.map(p=>p.label).find(n=>RCFG[tsName(n)])||'');
@@ -1716,6 +1727,9 @@ function loadLiveTeam(accId, J, opt = {}) {
   (J.timeOff||[]).forEach(t=>{
     if(!t.start||!t.end||!stOf[t.userId]||!(Date.parse(t.end)>Date.parse(t.start)))return;
     const [first,m]=local(t.start),[last]=local(new Date(Date.parse(t.end)-1).toISOString()),[endDay,endMin]=local(t.end),rs=reasonOf(t),from=dayMin(first,m),to=dayMin(endDay,endMin);
+    /* timed leave that starts after midnight inside last night's overnight shift belongs to that shift (leave from 00:00 is a calendar-day request) */
+    const pd=addD(first,-1),psh=SHIFTS[(codes[t.userId]||{})[pd]];
+    if(!RCFG[rs].rest&&m>0&&psh&&psh.e>1440&&from<dayMin(pd,psh.e))leaveDays.push({id:t.userId,d:pd,rs,from,to});
     range(first,last).forEach(d=>{days.push(d);
       if(RCFG[rs].rest){(rest[t.userId]=rest[t.userId]||{})[d]=rs;leaveDays.push({id:t.userId,d,rs,s:d===first?m:0,e:d===endDay?endMin:1440});return;}
       if(!(codes[t.userId]||{})[d]){const u=usual[t.userId],wd=dow(d);
@@ -1738,10 +1752,13 @@ function loadLiveTeam(accId, J, opt = {}) {
   };
   /* Leave counts only for the part of the shift it covers: none = ignored, most of it = whole day, otherwise part-day minutes. */
   const applyLeave=t=>{if(t.from==null)return applyTag(t.id,t.d,t.rs,t.s,t.e);
-    const sh=SHIFTS[(codes[t.id]||{})[t.d]];if(!sh)return;const s0=dayMin(t.d,sh.s),e0=dayMin(t.d,sh.e),len=e0-s0,cov=Math.max(0,Math.min(e0,t.to)-Math.max(s0,t.from));
+    const sh=SHIFTS[(codes[t.id]||{})[t.d]];if(!sh)return;
+    if(t.from<=dayMin(t.d,0)&&t.to>=dayMin(t.d,1440))return applyTag(t.id,t.d,t.rs);   // the whole calendar day off = that day's shift off, also for a night shift ending tomorrow
+    const s0=dayMin(t.d,sh.s),e0=dayMin(t.d,sh.e),len=e0-s0,cov=Math.max(0,Math.min(e0,t.to)-Math.max(s0,t.from));
     if(cov<=0)return;const o=OV[kOf(t.id,t.d)]=OV[kOf(t.id,t.d)]||{},prev=o.absence&&o.absence.source==='Shifts'&&o.absence.reason===t.rs?o.absence.mins:null;
     if(prev===undefined)return;                                          // already a whole day
-    const mins=Math.min(len,(prev||0)+cov);applyTag(t.id,t.d,t.rs);if(mins<len-15&&!RCFG[t.rs].partial)o.absence.mins=mins;};
+    const prevWin=prev?o.absence.win||[]:[],w0=Math.max(s0,t.from)-s0+sh.s,w1=Math.min(e0,t.to)-s0+sh.s;   // the leave window in shift minutes
+    const mins=Math.min(len,(prev||0)+cov);applyTag(t.id,t.d,t.rs);if(mins<len-15&&!RCFG[t.rs].partial){o.absence.mins=mins;o.absence.win=[...prevWin,[w0,w1]];}};
   Object.entries(tagged).forEach(([id,byD])=>Object.entries(byD).forEach(([d,rs])=>applyTag(id,d,rs)));
   leaveDays.forEach(applyLeave);
   if (!LIVE.accs.includes(accId)) LIVE.accs.push(accId);
@@ -1802,8 +1819,8 @@ function shiftsCheck(accId, J, opt = {}) {
   const who = uid => (AGI[uid] && AGI[uid].acc === accId ? AGI[uid] : byMail[mail.get(uid)]) || null;
   const got = {}, unknown = new Set(), lbl = (s, e) => `${hm(s)}–${hm(e)}`;
   (J.shifts || []).forEach(s => { if (!s.start || !s.end) return; const a = who(s.userId); if (!a) { unknown.add(s.userId); return; }
-    const [d, m] = local(s.start), dur = Math.round((new Date(s.end) - new Date(s.start)) / 6e4); if (dur <= 0) return;
-    ((got[a.id] = got[a.id] || {})[d] = got[a.id][d] || []).push({ s: m, e: m + dur, id: s.id, label: s.label || '', notes: s.notes || '', activities: Array.isArray(s.activities) ? readShiftActivities(accId,d,s.activities) : null }); });
+    const [d, m] = local(s.start), [de, me] = local(s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;
+    ((got[a.id] = got[a.id] || {})[d] = got[a.id][d] || []).push({ s: m, e, id: s.id, label: s.label || '', notes: s.notes || '', activities: Array.isArray(s.activities) ? readShiftActivities(accId,d,s.activities) : null }); });
   Object.values(got).forEach(byD => Object.keys(byD).forEach(d => { const list = byD[d]; if (list.length < 2) return; const { main, others } = mergeDayShifts(list), p = main.parts;   // Working day + OT = one span
     const acts = p.some(x => x.activities !== null) ? [...p.flatMap(x => x.activities || []), ...[]] : null;
     byD[d] = [{ s: main.s, e: main.e, id: p[0].id, ids: p.map(x => x.id), notes: p.map(x => x.notes).filter(Boolean).join(' · '), activities: acts }, ...others.map(b => b.parts[0])]; }));
@@ -2245,7 +2262,7 @@ let tt; const toast = m => { const t = $('toast'); t.textContent = m; t.classLis
 function render() {
   W.refreshFloor(); Object.entries(OPS.hourlyReferences).forEach(([k,n])=>{if(W.LOB[k])W.LOB[k].minInt=n;});
   const previousTimeline=$('gwrap'),timelinePosition=previousTimeline?{left:previousTimeline.scrollLeft,top:previousTimeline.scrollTop,day:previousTimeline.dataset.day,scope:previousTimeline.dataset.scope}:null;
-  const pickerScroll=document.querySelector('.spk-l')?.scrollTop || 0;
+  const pickerScroll=document.querySelector('.spk-l')?.scrollTop || 0, gridPos=$('bgrid')?{top:$('bgrid').scrollTop,left:$('bgrid').scrollLeft}:null;
   const fid = document.activeElement && document.activeElement.id, sel = fid && document.activeElement.selectionStart;
   if (isPhone()) { $('root').innerHTML = phoneBlock(); return; }
   $('root').innerHTML = S.auth ? shell() : signin();
@@ -2258,8 +2275,10 @@ function render() {
   });
   if (S.auth && !['home','help'].includes(S.page)) { const heading = document.querySelector('#main h1'); if (heading) heading.textContent = pageName(S.page); }
   const nextTimeline=$('gwrap');if(timelinePosition&&nextTimeline&&nextTimeline.dataset.day===timelinePosition.day&&nextTimeline.dataset.scope===timelinePosition.scope){nextTimeline.scrollLeft=timelinePosition.left;nextTimeline.scrollTop=timelinePosition.top;}
+  if(gridPos&&$('bgrid')){$('bgrid').scrollTop=gridPos.top;$('bgrid').scrollLeft=gridPos.left;}   // ticking person #150 keeps the Week grid where it was
   plainLabels();
   tidyHelp();
+  if (S.auth) { if (S.page === 'builder') bRestoreDraft(); bKeepDraft(); }
   if (fid && $(fid)) { $(fid).focus(); try { sel != null && $(fid).setSelectionRange(sel, sel); } catch (e) {} }
 }
 // Plain language for rendered labels; data keys and imported spreadsheet headers stay intact.
@@ -2329,7 +2348,7 @@ const siArt = () => `<section class="si-art"><div class="si-logo">${MARK} Workfo
         <small>© 2026 LEAN SOLUTIONS GROUP · WORKFORCE MANAGEMENT</small></div></section>`;
 function signin() {
   if (S.recovery) return recoveryScreen();
-  const sb = dbClient(), err = S.lgErr ? `<div class="note ${/created|emailed|check your email/i.test(S.lgErr) ? '' : 'bad'}" style="margin-bottom:6px">${esc(S.lgErr)}</div>` : '';
+  const sb = dbClient(), err = S.lgErr ? `<div class="note ${/created|emailed|check your email|…$/i.test(S.lgErr) ? '' : 'bad'}" style="margin-bottom:6px">${esc(S.lgErr)}</div>` : '';
   if (!sb && !DEV) return `<div class="signin">${siArt()}<section class="si-form"><div class="si-box"><h1>Not <span>connected</span> yet</h1>
     <p class="sub" style="font-size:14px;margin-top:8px">This copy of the Workforce Tool can't reach its database, so nobody can sign in.</p>
     <div class="note" style="margin-top:16px">Admin: put the Supabase <b>publishable</b> key in <span class="mono">config.js</span> next to this page (it starts with <span class="mono">sb_publishable_</span>; never the secret key), then reload.</div>
@@ -2372,7 +2391,7 @@ const canSee = k => roleCan(W.ME.role,k) && (['home','help'].includes(k) || !OPS
 const isAdmin = () => W.ME.role === 'Admin';
 const GUIDE = [
  ['live','Check who is working now','See who is scheduled, who has clocked in, and who needs attention.', ['Choose an account and location at the top.','Check the people needing attention before reviewing the full list.','Open a person to review their shift and clock-in details. Record an absence or expected arrival only after confirming it.','If clock-in data is missing, check the source before treating someone as absent.']],
- ['builder','Edit and send schedules','Prepare changes, review staffing, then send the changes to Teams Shifts.', ['Choose the week and station or team. In Day view, Bulk breaks & lunch adds, replaces or removes activities for everyone in the current filter or selected people. Preview automatic placement, then Apply to drafts. Lunch can be 60 minutes and breaks 15 minutes.','Choose a shift time, then click a day to add it. In Day view, use the person’s edit button to add activities, set exact-minute durations and choose Paid or Unpaid.','In Day view, drag a shift to move it or drag either edge to change its start or end. Hold the pointer near the left or right timeline edge to scroll automatically. The view stays in place after you drop. Click a break, lunch or coaching activity and press Delete (Mac Delete/Backspace also works) to remove it from the draft. Undo restores it. Review changes before publishing.','Use the person checkboxes before copying schedules or applying a repeating weekly schedule.','Review the staffing totals and your draft changes. Drafts have not been sent to Teams Shifts.','Publish uses Working day as the label and scheduled start–end times as notes. Flow v3 also sends activities; install it before live sending. Select Publish to send the changes. Check the send status and Compare with Teams Shifts afterward. A dry run only previews changes.']],
+ ['builder','Edit and send schedules','Prepare changes, review staffing, then send the changes to Teams Shifts.', ['Choose the week and station or team. In Day view, Bulk breaks & lunch adds, replaces or removes activities for everyone in the current filter or selected people. Preview automatic placement, then Apply to drafts. Lunch can be 60 minutes and breaks 15 minutes.','Choose a shift time, then hold Shift and drag across days to paint it. A plain click opens that day’s editor. In Day view, use the person’s edit button to add activities, set exact-minute durations and choose Paid or Unpaid.','In Day view, drag a shift to move it or drag either edge to change its start or end. Hold the pointer near the left or right timeline edge to scroll automatically. The view stays in place after you drop. Click a break, lunch or coaching activity and press Delete (Mac Delete/Backspace also works) to remove it from the draft. Undo restores it. Review changes before publishing.','Use the person checkboxes before copying schedules or applying a repeating weekly schedule.','Review the staffing totals and your draft changes. Drafts have not been sent to Teams Shifts.','Publish uses Working day as the label and scheduled start–end times as notes. Flow v3 also sends activities; install it before live sending. Select Publish to send the changes. Check the send status and Compare with Teams Shifts afterward. A dry run only previews changes.']],
  ['schedule','View schedules','Read each person’s shifts and days off for the selected week.', ['Choose an account, location and week.','Filter to the station or team you need.','Read the shift times and absence labels. Open a day for details.','Click a day to see its saved original, current schedule and change history. Prepare changes in Edit schedules. Teams is checked every minute while schedule pages are open when the reader is connected; unsent edits and duplicates require review.']],
  ['requests','Review leave requests','Decide on leave after checking how many people will still be available.', ['Use Refresh Teams requests if a submission is missing. Check each account’s last read or error; this page refreshes every minute while open.','Open a pending request.','Review the dates, reason and staffing after the requested leave.','Approve or decline the request using the available controls. Add a reason when required.','Check the result and the Teams Shifts send status.']],
  ['swaps','Review shift swaps','Check the proposed exchange and its effect on both people.', ['Open a request waiting for approval.','Review both schedules, staffing, rest time and any warnings.','Approve or decline. If an exception is allowed, explain it in the note.','Check that both schedules reflect the decision.']],
@@ -2432,7 +2451,16 @@ function pHelp() {
   ${reviewFaq()}<details class="panel guide-article"><summary>Words used in the tool</summary><dl><dt>Station / team</dt><dd>The work group a person belongs to.</dd><dt>Staffing / coverage</dt><dd>How many people are available to work compared with how many are needed.</dd><dt>Draft</dt><dd>A schedule change that has not been sent to Teams Shifts.</dd><dt>Publish</dt><dd>Send schedule changes to Teams Shifts. A dry run previews the result only.</dd><dt>Repeating schedule / pattern</dt><dd>A saved set of shifts that can be applied to one or more weeks.</dd><dt>Scheduled hours worked</dt><dd>Logged work time inside a planned shift, divided by scheduled work time.</dd></dl></details>`;
 }
 document.addEventListener('input', e => { if(e.target.id === 'helpQ') { HELP.q = e.target.value; render(); } });
-function syncPill() {
+function syncPill() { return dbSavePill() + shiftsPill(); }
+/* database save state: shown only while something is waiting, so a dropped connection is never silent */
+function dbSavePill() {
+  if (!DB.on || !dbPending()) return '';
+  const n = dbPending(), t = `${n} change${n === 1 ? '' : 's'}`;
+  return DB.offline ? `<span class="pill bad" title="No internet connection. Changes are kept on this computer and saved automatically when the connection is back."><i></i>Offline · ${t} waiting</span> `
+    : DB.err ? `<span class="pill warn" title="${esc(DB.err)} · retried automatically"><i></i>Not saved yet · ${t} · retrying</span> `
+    : `<span class="pill info"><i></i>Saving ${t}…</span> `;
+}
+function shiftsPill() {
   if (W.LIVE.on) { const L = W.LIVE, fail = W.SYNC.filter(j => j.status === 'Failed').length, busyL = W.SYNC.filter(j => ['Queued','Sending','Retrying'].includes(j.status)).length, retr = W.SYNC.filter(j => j.status === 'Retrying').length;
     const tl = Object.entries(DB.teams || {}).filter(([, x]) => x.st === 'loading').map(([k]) => W.ACC[k].name);
     if (tl.length) return `<span class="pill info" title="Reading people and schedules from their Shifts teams"><i></i>Loading ${esc(tl.join(', '))} from Shifts…</span>`;
@@ -2593,7 +2621,7 @@ function pRequests() {
   return `<div class="head"><div class="grow"><div class="kicker">From Microsoft Teams</div><h1>PTO <b>requests</b></h1><p class="sub">Every request shows the headcount for each day and hour before you decide. Decisions go back to Teams and Shifts.</p></div>
     <button class="btn" data-a="reqRefresh" ${scheduleReadBusy ? 'disabled' : ''}>${scheduleReadBusy ? 'Reading Teams…' : 'Refresh Teams requests'}</button><div class="seg">${['Pending','Decided'].map(k => `<button class="${S.reqTab === k ? 'on' : ''}" data-a="reqTab" data-v="${k}">${k} <span class="num" style="opacity:.6">${W.REQ.filter(x => accOk(W.AGI[x.agent]) && (k === 'Pending' ? x.status === 'Pending' : x.status !== 'Pending')).length}</span></button>`).join('')}</div></div>
   ${DB.on ? `<div class="note">${W.LIVE.accs.filter(inScope).map(acc => {const q=(DB.requests || {})[acc];return esc(W.ACC[acc].name) + ': ' + (!q ? 'requests not checked yet' : q.err ? esc(q.err) : q.count + ' requests · checked ' + esc(q.at) + (q.unmatched ? ' · ' + q.unmatched + ' could not be matched to the roster' : ''));}).join(' · ')}</div>` : ''}
-  <div class="cols c12"><div>${list.slice(0, 60).map(x => { const a = W.AGI[x.agent], v = reqVerdict(x); return `<button class="rq v-${x.status === 'Pending' ? v : x.status === 'Approved' ? 'ok' : 'short'} ${x.id === S.sel ? 'on' : ''}" data-a="selReq" data-v="${x.id}">
+  <div class="cols c12"><div>${list.length > 60 ? `<p class="meta" style="margin:0 0 8px">Showing the first 60 of ${list.length}. Narrow the account or location to see the rest.</p>` : ''}${list.slice(0, 60).map(x => { const a = W.AGI[x.agent], v = reqVerdict(x); return `<button class="rq v-${x.status === 'Pending' ? v : x.status === 'Approved' ? 'ok' : 'short'} ${x.id === S.sel ? 'on' : ''}" data-a="selReq" data-v="${x.id}">
       <div class="top2"><span class="nm">${esc(a.name)}</span>${x.status === 'Pending' ? (v === 'short' ? vPill(v) : v === 'tight' ? '<span class="meta" title="Approving leaves the station exactly at its minimum">at minimum</span>' : '') : `<span class="pill ${x.status === 'Approved' ? 'ok' : 'bad'}">${esc(x.status)}</span>`}</div>
       <div class="meta">${esc(lobName(a.key))} · ${esc(x.reason)} · ${fmtS(x.from)}${x.dates.length > 1 ? '–' + fmtS(x.to) : ''} · ${x.dates.length} day${x.dates.length > 1 ? 's' : ''}</div>
       <div class="meta">Teams · received ${esc(x.received.slice(5).replace('-', '/'))}</div></button>`; }).join('') || '<div class="empty panel">No requests here.</div>'}</div>
@@ -2925,7 +2953,7 @@ function pSettings() {
   return `<div class="head"><div class="grow"><div class="kicker">Microsoft 365 · rules · publishing</div><h1><b>Settings</b></h1><p class="sub">Every change here is written to the audit trail.</p></div></div>
   <div class="cols c2">
     <section class="panel"><div class="panel-h"><div class="grow"><h2>Microsoft Teams &amp; Shifts</h2><p class="sub">Bridge: Power Automate flows run by the WFM service account. No Azure app registration needed.</p></div><span class="pill ok"><i></i>Connected</span></div>
-      <table><thead><tr><th>Account</th><th>Shifts team</th><th>Leave requests</th><th>Schedules</th></tr></thead><tbody>${W.ACCOUNTS.map(a => `<tr><td class="nm">${a.name}</td><td>${esc(a.team)}</td><td><span class="pill ok"><i></i>Listening</span></td><td><span class="pill ok"><i></i>Publishing</span></td></tr>`).join('')}</tbody></table>
+      <table><thead><tr><th>Account</th><th>Shifts team</th><th>Leave requests</th><th>Schedules</th></tr></thead><tbody>${W.ACCOUNTS.map(a => `<tr><td class="nm">${esc(a.name)}</td><td>${esc(a.team)}</td><td><span class="pill ok"><i></i>Listening</span></td><td><span class="pill ok"><i></i>Publishing</span></td></tr>`).join('')}</tbody></table>
       <div class="field" style="margin-top:14px"><label class="f" for="setSrc">Login source for adherence</label><p class="foot-note">This setting names the attendance source used by Who is working now and Attendance &amp; work hours. Selecting a source does not connect it, download data or replace clock-in records that are already imported. Import the file or configure the connection first. Teams presence shows availability, not confirmed work time.</p><select class="in" id="setSrc" data-f="src" style="width:100%">${['Imported ACD export','Shifts time clock','Teams presence','ACD / phone login export'].map(x => `<option ${W.CFG.loginSource === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
         <p class="foot-note">Shifts time clock = agents clock in and out in Teams. Teams presence shows "Available" even when the agent isn't working, so it is less accurate. ACD export = upload the account's phone-system login report.</p></div>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-f="auto" ${W.CFG.autoPublish ? 'checked' : ''}> Publish schedule changes to Shifts automatically</label></section>
@@ -2936,7 +2964,7 @@ function pSettings() {
         <p class="meta" style="margin-top:4px">${esc(W.lateRuleText())}. Example: shift 09:00 → ${W.isLate(W.CFG.grace) ? `09:${String(W.CFG.grace).padStart(2, '0')} is late` : `09:${String(W.CFG.grace).padStart(2, '0')} is on time, 09:${String(W.CFG.grace + 1).padStart(2, '0')} is late`}. Late minutes count from the shift start.</p></div>
       <div class="cols c2">
         <div class="field"><label class="f" for="setR">Configured schedule reference (% of pattern)</label><input class="in" id="setR" type="number" min="50" max="100" value="${Math.round(W.CFG.reqPct * 100)}" data-f="req"></div></div>
-      <table><thead><tr><th>Account</th><th class="n">ABS target</th><th class="n">Scheduled hours worked target</th></tr></thead><tbody>${W.ACCOUNTS.map(a => `<tr><td>${a.name}</td><td class="n">${a.absTarget}%</td><td class="n">${a.adhTarget}%</td></tr>`).join('')}</tbody></table>
+      <table><thead><tr><th>Account</th><th class="n">ABS target</th><th class="n">Scheduled hours worked target</th></tr></thead><tbody>${W.ACCOUNTS.map(a => `<tr><td>${esc(a.name)}</td><td class="n">${a.absTarget}%</td><td class="n">${a.adhTarget}%</td></tr>`).join('')}</tbody></table>
       ${(() => { const all = Object.entries(W.SHIFTS).filter(([k]) => k !== 'OFF'), std = all.filter(([, s]) => !s.custom), sav = all.filter(([, s]) => s.custom && s.saved), oth = all.filter(([, s]) => s.custom && !s.saved).sort((x, y) => (x[1].s % 1440) - (y[1].s % 1440) || x[1].e - y[1].e);
         const chip = ([k, s]) => `<span>${W.ui.shift(k)} ${s.custom && s.saved ? '★ ' : ''}${esc(s.custom ? 'Custom' : s.name)} ${W.shiftLabel(k)}</span>`;
         return `<details style="margin-top:16px" ${S.tplOpen ? 'open' : ''} ontoggle="S.tplOpen = this.open"><summary style="cursor:pointer"><b>Shift templates</b> <span class="meta">· ${all.length} in use: ${std.length} standard${sav.length ? `, ${sav.length} saved ★` : ''}, ${oth.length} custom times from Shifts and edits · click to ${S.tplOpen ? 'hide' : 'show'}</span></summary>
@@ -3162,7 +3190,7 @@ function dbUserDrawer(p) {
   open(p ? `Edit · ${esc(p.name)}` : 'Add person', `
     ${p ? `<p class="sub" style="margin-bottom:10px">${esc(p.email)}</p>` : `<div class="field"><label class="f" for="uN">Full name</label><input class="in" id="uN" placeholder="e.g. Paola Ruiz"></div><div class="field"><label class="f" for="uE">Work email</label><input class="in" id="uE" type="email" placeholder="name@leangroup.com"></div>`}
     <div class="field"><label class="f" for="uR">Role</label><select class="in" id="uR" style="width:100%">${roles.map(r => `<option ${p && p.role === r ? 'selected' : (!p && r === 'RTA' ? 'selected' : '')}>${r}</option>`).join('')}</select><p class="foot-note">${Object.entries(ROLE_DESC).map(([k, v]) => `<b>${k}</b>: ${v}`).join('<br>')}</p></div>
-    ${accessChecklist(p)}<div class="field"><label class="f">Accounts</label><label style="display:block"><input type="checkbox" id="uAll" ${sc.includes('all') ? 'checked' : ''}> All accounts (current and future)</label>${W.ACCOUNTS.map(a => `<label style="display:block"><input type="checkbox" class="uAcc" value="${a.id}" ${sc.includes(a.id) ? 'checked' : ''}> ${a.name}</label>`).join('')}</div>`,
+    ${accessChecklist(p)}<div class="field"><label class="f">Accounts</label><label style="display:block"><input type="checkbox" id="uAll" ${sc.includes('all') ? 'checked' : ''}> All accounts (current and future)</label>${W.ACCOUNTS.map(a => `<label style="display:block"><input type="checkbox" class="uAcc" value="${a.id}" ${sc.includes(a.id) ? 'checked' : ''}> ${esc(a.name)}</label>`).join('')}</div>`,
     `<button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="dbSaveUser" data-v="${p ? p.id : ''}">${p ? 'Save' : 'Add & create login'}</button>`);
 }
 function pUsers() {
@@ -3187,7 +3215,7 @@ function userDrawer(u) {
   open(u ? `Edit · ${esc(u.name)}` : 'Create account', `
     ${u ? '' : `<div class="field"><label class="f" for="uN">Full name</label><input class="in" id="uN" placeholder="e.g. Paola Ruiz"></div><div class="field"><label class="f" for="uE">Work email</label><input class="in" id="uE" type="email" placeholder="name@leangroup.com"></div>`}
     <div class="field"><label class="f" for="uR">Role</label><select class="in" id="uR" style="width:100%">${roles.map(r => `<option ${u && u.role === r ? 'selected' : (!u && r === 'RTA' ? 'selected' : '')}>${r}</option>`).join('')}</select><p class="foot-note">${Object.entries(ROLE_DESC).map(([k, v]) => `<b>${k}</b>: ${v}`).join('<br>')}</p></div>
-    ${accessChecklist(u)}<div class="field"><label class="f">Accounts</label><label style="display:block"><input type="checkbox" id="uAll" ${sc.includes('all') ? 'checked' : ''}> All accounts (current and future)</label>${W.ACCOUNTS.map(a => `<label style="display:block"><input type="checkbox" class="uAcc" value="${a.id}" ${sc.includes(a.id) ? 'checked' : ''}> ${a.name}</label>`).join('')}</div>
+    ${accessChecklist(u)}<div class="field"><label class="f">Accounts</label><label style="display:block"><input type="checkbox" id="uAll" ${sc.includes('all') ? 'checked' : ''}> All accounts (current and future)</label>${W.ACCOUNTS.map(a => `<label style="display:block"><input type="checkbox" class="uAcc" value="${a.id}" ${sc.includes(a.id) ? 'checked' : ''}> ${esc(a.name)}</label>`).join('')}</div>
     ${u ? '' : '<div class="note">A temporary password is shown once after you create the account. Share it privately; the user must change it at first sign-in. In production the tool can email an invite link instead.</div>'}`,
     `<button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="saveUser" data-v="${u ? u.id : ''}">${u ? 'Save' : 'Create account'}</button>`);
 }
@@ -3219,7 +3247,7 @@ function pSchAudit() {
         <td>${x.issues.map(i => `<span class="pill ${ISSUE[i.k][1]}" title="${esc(i.t)}">${esc(i.t)}</span>`).join(' ')}</td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Nothing flagged for this week. Every agent has a valid schedule.</div></td></tr>'}</tbody></table></div></section>
     <section class="panel"><h2 style="margin-bottom:8px">Completeness by LOB</h2><table><thead><tr><th>LOB</th><th class="n">Agents</th><th class="n">Clean</th><th class="n">No schedule</th><th style="width:30%"></th></tr></thead><tbody>
       ${lobs.map(x => `<tr><td class="nm">${esc(x.l.name)}</td><td class="n">${x.n}</td><td class="n">${x.ok}</td><td class="n" style="color:${x.none ? 'var(--bad)' : 'inherit'}">${x.none || ''}</td><td><div class="bar"><b style="width:${x.n ? x.ok / x.n * 100 : 0}%"></b></div></td></tr>`).join('')}</tbody></table>
-      <p class="foot-note">This check runs every Monday at 06:00 for the next 3 weeks. Results go to the RTA group chat on the Notifications page. New people imported from the roster or Teams start with no pattern and show up here until one is assigned.</p></section></div>`;
+      <p class="foot-note">This check runs each time this page opens and covers the next 3 weeks. New people imported from the roster or Teams start with no pattern and show up here until one is assigned.</p></section></div>`;
 }
 
 /* ---------- WHAT-IF ---------- */
@@ -3574,7 +3602,7 @@ function swapDetail(sw) {
   const monthN = ag => W.SWAPS.filter(x => x.status === 'Approved' && (x.a === ag.id || x.b === ag.id) && x.da.slice(0, 7) === TODAY.slice(0, 7)).length;
   const pend = sw.status === 'Pending approval';
   return `<section class="panel"><div class="panel-h"><div class="grow"><h2 style="font:400 22px/1.2 var(--serif)">${esc(A.name)} ⇄ ${esc(B.name)}</h2><p class="sub">${sw.id} · ${SWT[sw.type]} · requested by ${esc(A.name.split(' ')[0])}, ${sw.status === 'Waiting for coworker' ? 'not yet accepted by ' + esc(B.name.split(' ')[0]) : 'accepted by ' + esc(B.name.split(' ')[0])} · ${esc(sw.received)}</p></div>
-      ${pend ? `<span class="pill ${chk[C.result][1]}">${({pass:'Passes all rules', warn:'Check warnings', fail:'Breaks a rule'})[C.result]}</span>` : `<span class="pill ${sw.status === 'Approved' ? 'ok' : sw.status === 'Declined' ? 'bad' : 'muted'}">${sw.status}</span>`}</div>
+      ${pend ? `<span class="pill ${chk[C.result][1]}">${({pass:'Passes all rules', warn:'Check warnings', fail:'Breaks a rule'})[C.result]}</span>` : `<span class="pill ${sw.status === 'Approved' ? 'ok' : sw.status === 'Declined' ? 'bad' : 'muted'}">${esc(sw.status)}</span>`}</div>
     ${sw.note ? `<div class="q">“${esc(sw.note)}”</div>` : ''}
     <h2 style="margin:14px 0 6px">${sw.status === 'Approved' ? 'Schedule after the swap' : 'Before ↓ after'}</h2>
     <div class="tw"><table><thead><tr><th>Agent</th>${span.map(d => `<th style="text-align:center;${ds.includes(d) ? 'color:var(--acc)' : ''}">${fmtD(d, { weekday:'short', day:'numeric' })}</th>`).join('')}</tr></thead><tbody>${row(A)}${row(B)}</tbody></table></div>
@@ -3616,7 +3644,7 @@ function rollDrawer() {
 }
 /* ---------- CONNECTIONS (same wiring as the live Crane PTO Portal) ---------- */
 const CONN = (() => { const cfg = window.WFT_CONFIG || {}, withCfg = c => { ['dbUrl','dbKey'].forEach(k => { if (cfg[k] && !/PASTE_/.test(cfg[k])) c[k] = cfg[k]; }); c.standalone=cfg.standalone===true; if(cfg.flowUrl&&!c.flowUrl)c.flowUrl=cfg.flowUrl; return c; }; const d = { inUrl:'', toWindow:'allday', theme:'Purple', inTest:null, dbUrl:'https://xrzpbkilkswyflzagcfw.supabase.co', dbKey:'', flowUrl:'', autoSend:true, teams:{ CRN:'7fd45419-003c-4a9f-b2c3-1b88c7b65702', ONT:'c6cb7bb2-8512-483d-8c67-fecbecf31ed2', RIV:'a1f3c21e-3bb2-4794-8ab9-bb83a350f613' }, dbTest:null, flowTest:null };
-  try { const s = JSON.parse(localStorage.getItem('wft.conn') || '{}'); const t = { ...d.teams }; Object.entries(s.teams || {}).forEach(([k, v]) => { if (v) t[k] = v; }); return withCfg({ ...d, ...s, teams:t, dbTest:null, flowTest:null }); } catch (e) { return withCfg({ ...d }); } })();
+  try { const s = JSON.parse(localStorage.getItem('wft.conn') || '{}'); delete s.flowUrl; delete s.pubUrl; delete s.readUrl; const t = { ...d.teams }; Object.entries(s.teams || {}).forEach(([k, v]) => { if (v) t[k] = v; }); return withCfg({ ...d, ...s, teams:t, dbTest:null, flowTest:null }); } catch (e) { return withCfg({ ...d }); } })();
 (() => {   // Shifts team mapping: saved rows win; older saves only had one team ID per account
   if (Array.isArray(CONN.teamMap) && CONN.teamMap.length) W.TEAM_MAP.splice(0, W.TEAM_MAP.length, ...CONN.teamMap.filter(r => r && r.acc && r.id));
   else Object.entries(CONN.teams || {}).forEach(([acc, id]) => { const r = W.TEAM_MAP.find(x => x.acc === acc && x.site === '*' && x.station === '*'); if (r && W.parseTeamId(id)) r.teamId = W.parseTeamId(id); });
@@ -3630,7 +3658,9 @@ function dbClient() {
   if (DEV) return null; // localhost demo stays isolated even with the deployed database config
   if (!window.supabase || !CONN.dbUrl || !CONN.dbKey) return null;
   if (!DB.sb || DB.key !== CONN.dbKey + CONN.dbUrl) { DB.sb = supabase.createClient(CONN.dbUrl.replace(/\/+$/, ''), CONN.dbKey, { auth:{ persistSession:true, storageKey:'wft-auth', autoRefreshToken:true } }); DB.key = CONN.dbKey + CONN.dbUrl;
-    DB.sb.auth.onAuthStateChange(ev => { if (ev === 'PASSWORD_RECOVERY') { S.recovery = true; S.auth = false; render(); } }); }
+    DB.sb.auth.onAuthStateChange(ev => { if (ev === 'PASSWORD_RECOVERY') { S.recovery = true; S.auth = false; render(); }
+      if (ev === 'SIGNED_OUT' && S.auth && !S.leaving) { const n = dbPending(); dbKeepOutbox(); DB.on = false; S.auth = false;
+        S.lgErr = 'Your sign-in expired. Sign in again to continue' + (n ? ` · ${n} unsaved change${n === 1 ? ' is' : 's are'} kept on this computer and will be saved after you sign in.` : '.'); render(); } }); }
   return DB.sb;
 }
 async function dbAfterSignIn() {
@@ -3642,8 +3672,8 @@ async function dbAfterSignIn() {
   if (error) { await sb.auth.signOut(); S.lgErr = 'Signed in, but the Workforce Tool tables could not be read: ' + error.message; S.auth = false; return render(); }
   if (p.status === 'Disabled') { await sb.auth.signOut(); S.lgErr = 'This account is disabled. Ask your WFM admin.'; S.auth = false; return render(); }
   if (p.role === 'Pending') { await sb.auth.signOut(); S.lgErr = `Signed in as ${p.email}, but no role has been given yet. Ask your WFM admin to open Users & access and set your role.`; S.auth = false; return render(); }
-  DB.on = true; DB.profile = p; W.setMe(p);
-  S.lgErr = 'Loading live Crane data…'; render();
+  DB.on = true; DB.profile = p; W.setMe(p); await dbReplayOutbox();
+  S.lgErr = 'Signed in. Loading your accounts… the first load can take a few minutes…'; render();
   await dbLoadLive(p);
   W.audit('Access', 'Signed in', p.email, '', p.role, 'Supabase Auth');
   S.lgErr = ''; S.auth = true; S.acc = W.LIVE.accs.length === 1 ? W.LIVE.accs[0] : 'all'; S.page = 'overview';
@@ -3657,7 +3687,7 @@ async function dbLoadLive(p) {
   if (error || !L) { DB.mute = false; DB.liveErr = error ? error.message : 'No data'; W.loadLive('CRN', { roster:[], sched:[], base:[], requests:[] }); return; }
   W.loadLive('CRN', L); W.AUD.length = 0;
   const st = await DB.sb.from('wft_settings').select('key,value').in('key', ['flowUrl']);
-  (st.data || []).forEach(x => { if (x.key === 'flowUrl' && x.value && x.value.url && !CONN.flowUrl) CONN.flowUrl = x.value.url; });
+  (st.data || []).forEach(x => { if (x.key === 'flowUrl' && x.value && x.value.url) CONN.flowUrl = x.value.url; });
   /* standalone: Crane's schedule, change history and clock-ins are read per account by dbRestoreTeam after sign-in; reading them here
      too made sign-in wait on the slowest table (Crane's change history) before the tool opened */
   const none = { data:[] }, [sd, ch, rq] = await Promise.all([
@@ -3755,21 +3785,65 @@ W.onTemplate(async x => { if (!DB.on) return;
 async function dbSaveAccTz() { if (!DB.on || !isAdmin()) return; const map = {}; W.ACCOUNTS.forEach(a => { map[a.id] = W.zoneOf(a.id); });
   const { error } = await DB.sb.from('wft_settings').upsert({ key:'acctz', value:map, updated_by:W.ME.name, updated_at:new Date().toISOString() }); toast(error ? 'Time zone not saved: ' + error.message : 'Time zone saved for everyone · publish again to move existing shifts'); }
 async function dbSaveRules() { if (!DB.on || !isAdmin()) return; const { error } = await DB.sb.from('wft_settings').upsert({ key:'rules', value:{ grace:W.CFG.grace, lateRule:W.CFG.lateRule }, updated_by:W.ME.name, updated_at:new Date().toISOString() }); toast(error ? 'Rule not saved: ' + error.message : 'Tardiness rule saved for everyone'); }
-W.onCell((a, d) => { if (!DB.on || DB.mute || !a.live) return; DB.dayQ = DB.dayQ.filter(x => !(x.person_id === a.id && x.d === d)); DB.dayQ.push(W.dayRow(a, d)); clearTimeout(DB.dt); DB.dt = setTimeout(dbFlushDays, 800); });
+W.onCell((a, d) => { if (!DB.on || DB.mute || !a.live) return; DB.dayQ = DB.dayQ.filter(x => !(x.person_id === a.id && x.d === d)); DB.dayQ.push({ ...W.dayRow(a, d), updated_at:new Date().toISOString() }); dbKeepOutbox(); clearTimeout(DB.dt); DB.dt = setTimeout(dbFlushDays, 800); });
 W.onChangeLog((a, d, x) => { if (!DB.on || DB.mute || !a.live) return;
   /* a change read from Teams that exactly repeats the last change of the same kind for that person-day is not logged again (the background
      compare used to re-log the same difference on every refresh). A change back (A→B then B→A) is real and is logged. */
   const h = W.CHG[W.kOf(a.id, d)] || [], prev = h.slice(0, -1).reverse().find(e => e.kind === x.kind);
   if (x.by === 'Shifts' && prev && prev.by === 'Shifts' && prev.before === x.before && prev.after === x.after) return;
-  DB.chgQ.push({ person_id:a.id, account_id:a.acc, d, by_name:x.by, by_role:x.role, kind:x.kind, before:x.before, after:x.after, reason:x.reason, remark:x.remark, source:x.source }); clearTimeout(DB.ct); DB.ct = setTimeout(dbFlushChanges, 800); });
+  DB.chgQ.push({ person_id:a.id, account_id:a.acc, d, by_name:x.by, by_role:x.role, kind:x.kind, before:x.before, after:x.after, reason:x.reason, remark:x.remark, source:x.source, at:new Date().toISOString() }); dbKeepOutbox(); clearTimeout(DB.ct); DB.ct = setTimeout(dbFlushChanges, 800); });
+/* save outbox: schedule edits, change history and activity rows wait in DB.dayQ / chgQ / q until Supabase confirms them. A copy is kept in
+   this browser for the signed-in user, so a dropped connection, an expired sign-in or a closed tab does not lose them: they are sent again
+   when the connection comes back, when the tab is shown again and at the next sign-in. Only one save per queue runs at a time, and a
+   batch leaves the queue only after it is confirmed, so a slow save can never land after a newer one. */
+const OUTBOX_KEY = 'wft.outbox';
+const dbPending = () => DB.dayQ.length + DB.chgQ.length + DB.q.length;
+function dbKeepOutbox() {
+  try { if (!DB.profile) return; if (dbPending()) localStorage.setItem(OUTBOX_KEY, JSON.stringify({ user:DB.profile.id, at:new Date().toISOString(), dayQ:DB.dayQ, chgQ:DB.chgQ, q:DB.q }));
+    else localStorage.removeItem(OUTBOX_KEY); } catch (e) {}
+  const p = $('syncPill'); if (p && S.auth) p.innerHTML = syncPill();
+}
+function dbSaveFailed(error, label) {
+  const msg = error && error.message || String(error), offline = !navigator.onLine || /fetch|network|load failed/i.test(msg);
+  DB.err = msg; DB.offline = offline; dbKeepOutbox();
+  if (/jwt|token|401|PGRST30/i.test(msg + ' ' + (error && error.code || ''))) DB.sb.auth.refreshSession().catch(() => {});
+  if (!offline && !DB.errShown) { DB.errShown = true; toast(label + msg + ' · kept on this computer and retried automatically'); }
+  clearTimeout(DB.retryT); DB.retry = Math.min((DB.retry || 7500) * 2, 120000); DB.retryT = setTimeout(dbFlushAll, DB.retry);
+}
+function dbSaveOk() { if (DB.offline || DB.errShown) toast('Connection back · all changes saved'); DB.err = ''; DB.offline = false; DB.errShown = false; DB.retry = 0; dbKeepOutbox(); }
 async function dbFlushDays() {
-  if (!DB.on || !DB.peopleOk || !DB.dayQ.length) return; const b = DB.dayQ.splice(0);
-  const { error } = await DB.sb.from('wft_schedule').upsert(b); if (error) { DB.dayQ.unshift(...b); DB.err = error.message; toast('Could not save the schedule change: ' + error.message); setTimeout(dbFlushDays, 15000); }
+  if (!DB.on || !DB.peopleOk || !DB.dayQ.length || DB.dayBusy) return; DB.dayBusy = true; const b = DB.dayQ.slice(0, 500);
+  const { error } = await DB.sb.from('wft_schedule').upsert(b).then(r => r, e => ({ error:e })); DB.dayBusy = false;
+  if (error) return dbSaveFailed(error, 'Could not save the schedule change: ');
+  DB.dayQ = DB.dayQ.filter(x => !b.includes(x)); if (DB.dayQ.length) dbFlushDays(); else if (!DB.chgQ.length && !DB.q.length) dbSaveOk(); else dbKeepOutbox();
 }
 async function dbFlushChanges() {
-  if (!DB.on || !DB.chgQ.length) return; const b = DB.chgQ.splice(0);
-  const { error } = await DB.sb.from('wft_changes').insert(b); if (error) { DB.chgQ.unshift(...b); DB.err = error.message; setTimeout(dbFlushChanges, 15000); }
+  if (!DB.on || !DB.chgQ.length || DB.chgBusy) return; DB.chgBusy = true; const b = DB.chgQ.slice(0, 500);
+  const { error } = await DB.sb.from('wft_changes').insert(b).then(r => r, e => ({ error:e })); DB.chgBusy = false;
+  if (error) return dbSaveFailed(error, 'Could not save the change history: ');
+  DB.chgQ = DB.chgQ.filter(x => !b.includes(x)); if (DB.chgQ.length) dbFlushChanges(); else if (!DB.dayQ.length && !DB.q.length) dbSaveOk(); else dbKeepOutbox();
 }
+function dbFlushAll() { if (!DB.on) return; dbFlushDays(); dbFlushChanges(); dbFlush(); }
+/* at sign-in: send what an earlier visit by the same user could not save. A day someone else changed after that edit is not overwritten. */
+async function dbReplayOutbox() {
+  let o = null; try { o = JSON.parse(localStorage.getItem(OUTBOX_KEY) || 'null'); } catch (e) {}
+  if (!o || o.user !== DB.profile.id) return;
+  const days = o.dayQ || [], keep = []; let skipped = 0;
+  for (const acc of [...new Set(days.map(x => x.account_id))]) {
+    const mine = days.filter(x => x.account_id === acc);
+    const { data, error } = await DB.sb.from('wft_schedule').select('person_id,d,updated_at').eq('account_id', acc)
+      .in('person_id', [...new Set(mine.map(x => x.person_id))]).in('d', [...new Set(mine.map(x => x.d))]);
+    if (error) { keep.push(...mine); continue; }
+    const at = new Map((data || []).map(r => [r.person_id + '|' + r.d, r.updated_at]));
+    mine.forEach(x => { const cur = at.get(x.person_id + '|' + x.d); if (!cur || !x.updated_at || new Date(cur) <= new Date(x.updated_at)) keep.push(x); else skipped++; });
+  }
+  DB.dayQ.push(...keep); DB.chgQ.push(...(o.chgQ || [])); DB.q.push(...(o.q || [])); dbKeepOutbox();
+  if (keep.length || skipped) toast(`${keep.length} unsaved schedule change${keep.length === 1 ? '' : 's'} from your last visit ${keep.length === 1 ? 'is' : 'are'} being saved${skipped ? ` · ${skipped} skipped because someone changed that day later` : ''}`);
+  dbFlushAll();
+}
+window.addEventListener('online', () => { DB.offline = false; dbFlushAll(); });
+window.addEventListener('offline', () => { DB.offline = true; dbKeepOutbox(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && dbPending()) dbFlushAll(); });
 /* what "publishing" does in live mode: PTO decisions go to Shifts through the live flow; shift publishing is off at launch */
 /* publishing safety: who the tool may write to in Shifts. account ticked → optional stations / named people → Dry run (preview only) or Live */
 const stOf = a => a.station || (W.LOB[a.key] || {}).station || (W.LOB[a.key] || {}).lob || '';
@@ -4007,16 +4081,17 @@ async function dbLoadUsers() {
   const [p, i] = await Promise.all([DB.sb.from('wft_profiles').select('*').order('name'), DB.sb.from('wft_invites').select('*').order('created_at', { ascending:false })]);
   DB.users = { profiles:p.data || [], invites:i.data || [], err:(p.error || i.error || {}).message || '' };
 }
-W.onAudit(e => { if (!DB.on || DB.mute) return; DB.q.push({ user_name:e.user, module:e.module, action:e.action, record:String(e.record || ''), before:String(e.before ?? ''), after:String(e.after ?? ''), note:e.note || '', user_id:DB.profile.id }); clearTimeout(DB.t); DB.t = setTimeout(dbFlush, 1500); });
+W.onAudit(e => { if (!DB.on || DB.mute) return; DB.q.push({ user_name:e.user, module:e.module, action:e.action, record:String(e.record || ''), before:String(e.before ?? ''), after:String(e.after ?? ''), note:e.note || '', user_id:DB.profile.id, at:new Date().toISOString() }); dbKeepOutbox(); clearTimeout(DB.t); DB.t = setTimeout(dbFlush, 1500); });
 async function dbFlush() {
-  if (!DB.on || DB.flushing || !DB.q.length) return; DB.flushing = true; const batch = DB.q.splice(0, 200);
-  const { error } = await DB.sb.from('wft_audit').insert(batch); DB.flushing = false;
-  if (error) { DB.q.unshift(...batch); DB.err = error.message; console.warn('audit save failed', error.message); setTimeout(dbFlush, 15000); } else { DB.err = ''; if (DB.q.length) dbFlush(); }
+  if (!DB.on || DB.flushing || !DB.q.length) return; DB.flushing = true; const batch = DB.q.slice(0, 200);
+  const { error } = await DB.sb.from('wft_audit').insert(batch).then(r => r, e => ({ error:e })); DB.flushing = false;
+  if (error) { console.warn('audit save failed', error.message); return dbSaveFailed(error, 'Could not save the activity history: '); }
+  DB.q = DB.q.filter(x => !batch.includes(x)); if (DB.q.length) dbFlush(); else if (!DB.dayQ.length && !DB.chgQ.length) dbSaveOk(); else dbKeepOutbox();
 }
-window.addEventListener('beforeunload', () => { if (DB.q.length) dbFlush(); });
+window.addEventListener('beforeunload', e => { if (!dbPending() || S.leaving) return; dbKeepOutbox(); dbFlushAll(); e.preventDefault(); e.returnValue = ''; });
 setTimeout(async () => { const sb = dbClient(); if (!sb || S.auth || S.recovery) return; const { data } = await sb.auth.getSession(); if (data && data.session) dbAfterSignIn(); }, 50);
 const saveTeams = () => { CONN.teamMap = W.TEAM_MAP.map(r => ({ ...r })); saveConn(); };
-const saveConn = () => { try { const { dbTest, flowTest, inTest, ...keep } = CONN; localStorage.setItem('wft.conn', JSON.stringify(keep)); } catch (e) {} };
+const saveConn = () => { try { const { dbTest, flowTest, inTest, flowUrl, pubUrl, readUrl, ...keep } = CONN; localStorage.setItem('wft.conn', JSON.stringify(keep)); } catch (e) {} }; // flow links stay out of browser storage: they come from the database at sign-in, so removing someone's role also removes their access
 const FLOW_ACTIONS = [
   ['test', 'Check the flow answers', 'Live', 'Response 200 {"message":"ok"}'],
   ['create', 'Create time off in Shifts (approved PTO, logged absence)', 'Live', 'Shifts · CreateTimeOff for each day'],
@@ -4047,6 +4122,21 @@ function flowDiagram() {
     ${arr(818, 168, 750, 168, 'saves', 'out')}${arr(818, 186, 492, 232, 'calls (action)', 'out')}
     ${arr(288, 214, 202, 60, '', 'out')}${arr(288, 236, 202, 136, '', 'out')}
   </svg><div class="legend"><span><i style="background:var(--acc)"></i>Data coming in</span><span><i style="background:var(--warn)"></i>Decisions going out</span></div>`;
+}
+/* daily database backup (supabase/011_auto_backup.sql): a copy of every wft_ table at 08:00 UTC, 14 days kept, Admins see the status here */
+async function dbLoadBackup() { if (!DB.on || DB.backupBusy) return; DB.backupBusy = true;
+  const { data, error } = await DB.sb.rpc('wft_backup_status').then(r => r, e => ({ error:e })); DB.backupBusy = false;
+  DB.backup = error ? { err: /wft_backup_status|function|schema cache/i.test(error.message) ? 'setup' : error.message } : data; if (S.page === 'connect') render(); }
+function backupPanel() {
+  if (DB.backup === undefined) { setTimeout(dbLoadBackup); return ''; }
+  const b = DB.backup || {}, age = b.last_at ? (Date.now() - new Date(b.last_at)) / 36e5 : null, late = age == null || age > 26;
+  return `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Automatic backup</h2><p class="sub">Every day at 03:00 Bogotá the database copies the Workforce Tool tables (people, schedules, plan, requests, swaps, clock-ins, balances, users, settings, publish history) into a private backup area. The change and activity logs are insert-only and go off-site with the weekly SharePoint export. The last 14 days are kept. Only the database owner can restore, from the Supabase SQL editor.</p></div>
+    ${b.err ? '' : `<button class="btn sm" data-a="backupNow" ${DB.backupBusy ? 'disabled' : ''}>Back up now</button>`}</div>
+    ${b.err === 'setup' ? '<div class="note warn">Not set up yet. Run <b>supabase/011_auto_backup.sql</b> once in the Supabase SQL editor.</div>'
+      : b.err ? `<div class="note bad">Backup status could not be read: ${esc(b.err)}</div>`
+      : `<table><tbody><tr><td>Last backup</td><td><span class="pill ${late ? 'bad' : 'ok'}"><i></i>${b.last_at ? esc(new Date(b.last_at).toLocaleString()) : 'none yet'}</span>${late && b.last_at ? ' over a day ago: check the daily job' : ''}</td></tr>
+        <tr><td>Daily job</td><td>${b.job ? 'On · 08:00 UTC' : '<b>Off</b> · run 011_auto_backup.sql again'}</td></tr>
+        <tr><td>Kept</td><td>${b.days || 0} day${b.days === 1 ? '' : 's'} · ${b.tables || 0} tables · ${Number(b.rows || 0).toLocaleString()} rows in the last copy · ${b.mb ?? 0} MB</td></tr></tbody></table>`}</section>`;
 }
 function pConnect() {
   const C = CONN, ed = isAdmin(), dt = C.dbTest, ft = C.flowTest;
@@ -4082,6 +4172,7 @@ function pConnect() {
       <li>The next receiving run reads Shifts back, so the tool and Shifts stay in step. A change made directly in Shifts also comes back on the next run.</li>
       <li>Optional: add an HTTP trigger to the receiving flow and paste it in ① for a <b>Sync now</b> button.</li></ol></section></div>
   ${DB.on?`<section class="panel"><h2>Shared Teams snapshot</h2><p>${DB.cacheError?'Snapshot unavailable: '+esc(DB.cacheError)+'. Apply teams-cache-setup.sql in this Workforce Tool project.':DB.cacheSavedAt?'Last saved '+esc(new Date(DB.cacheSavedAt).toLocaleString()):'Waiting for the first complete Teams read.'}</p><p class="meta">Schedules, native activities, rest/leave, members, groups, reason definitions and received requests are cached by account. Saved tool edits and clock-ins load separately. Refresh failures retain the snapshot with its capture time.</p></section>`:''}
+  ${isAdmin() && DB.on ? backupPanel() : ''}
   ${ed && (DB.on || DEV) ? `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Data export · SharePoint / Power BI</h2><p class="sub">Everything that happens in the tool, as one row per person per day: plan vs current schedule (with the change, its reason and who made it), absences (planned / unplanned), scheduled vs logged minutes, late, early out, no-show, ETA. Plus the raw records. For backup and for BI (daily, weekly, monthly).</p></div><button class="btn sm" data-a="factsCsv">Download CSV now</button></div>
     ${DB.on ? '' : '<div class="note warn" style="margin-bottom:10px"><b>Local test mode:</b> Download CSV works here with sample data; the snapshot and key need the live database.</div>'}
     <ol class="meta" style="margin:0 0 10px 18px;line-height:1.7"><li><b>Daily snapshot:</b> the first Admin or RTA session each day saves ${FACTS_BACK} days back to ${FACTS_AHEAD} days ahead into the database (in the background).</li><li><b>Weekly flow</b> <b>Workforce Tool - weekly export</b> asks for the last 5 weeks + next 3 and saves one CSV per dataset in your SharePoint folder (dated subfolder).</li><li><b>Power BI</b> reads the SharePoint folder and keeps the newest row per person-day.</li></ol>
@@ -4254,7 +4345,7 @@ function pBuilder() {
   if (!B.tool) B.tool = tpl.find(c => use[c]) || tpl[0];
   const chip = (c, i) => `<button class="bchip ${B.tool === c ? 'on' : ''}" data-a="bTool" data-v="${c}" style="${chipStyle(c)}" title="${c === 'OFF' ? 'Rest day' : W.shiftLabel(c) + (W.SHIFTS[c].saved ? ' · saved by ' + esc(W.SHIFTS[c].by || '') : '')} · key ${i}">${c !== 'OFF' && W.SHIFTS[c].saved ? '★ ' : ''}${c === 'OFF' ? 'Off' : W.shiftLabel(c)}<small>${use[c] || ''}</small><kbd>${i}</kbd></button>`;
   const cell = (a, d) => { const s = W.sched(a, d), c = bCode(a, d), dr = B.draft[bKey(a.id, d)] !== undefined, lock = bLocked(a, d);
-    return `<td class="bc ${dr ? 'dr' : ''} ${lock ? 'lk' : ''} ${d === TODAY ? 'today' : ''}" role="button" tabindex="0" data-id="${a.id}" data-d="${d}" title="${esc(a.name)} · ${fmtD(d)} · ${c === 'OFF' ? 'Off' : W.shiftLabel(c)}${lock ? ' · ' + esc(bReason(a,d)) + ' (locked)' : ''}">${lock ? abTag(bReason(a,d)) : `<span class="bs" style="${chipStyle(c)}">${c === 'OFF' ? (bReason(a,d)||'Off · no reason recorded') : W.shiftShort(c)}</span>`}</td>`; };
+    return `<td class="bc ${dr ? 'dr' : ''} ${lock ? 'lk' : ''} ${d === TODAY ? 'today' : ''}" role="button" tabindex="0" data-id="${a.id}" data-d="${d}" title="${esc(a.name)} · ${fmtD(d)} · ${c === 'OFF' ? 'Off' : W.shiftLabel(c)}${lock ? ' · ' + esc(bReason(a,d)) + ' (locked)' : ''}">${lock ? abTag(bReason(a,d)) : `<span class="bs" style="${chipStyle(c)}">${c === 'OFF' ? esc(bReason(a,d)||'Off · no reason recorded') : W.shiftShort(c)}</span>`}</td>`; };
   const changesAll = new Set([...Object.keys(B.draft), ...Object.keys(B.brk), ...Object.keys(B.tags)]).size;
   const head = `<div class="head"><div class="grow"><div class="kicker">${B.view === 'day' ? 'Intraday · shifts, breaks and interval staffing' : 'Add shifts · copy · apply patterns · publish'} · times in ${esc([...new Set(B.lobs.map(k => (W.LOB[k] || {}).acc).filter(Boolean))].map(x => W.ACC[x].name + ' ' + W.zoneLabel(W.zoneOf(x)).replace(/ ·.*/, '')).join(' / ') || '')}</div><h1><b>Edit schedules</b></h1><p class="sub">${B.view === 'day' ? 'One day on a timeline: drag shifts and breaks, and watch staffing per 15 minutes.' : 'Pick a shift time, then click or drag across cells to add that shift.'} Changes stay as a draft until you publish.</p></div>
     <div class="seg">${[['day','Day'],['week','Week']].map(([k, l]) => `<button class="${B.view === k ? 'on' : ''}" data-a="bView" data-v="${k}">${l}</button>`).join('')}</div>
@@ -4277,7 +4368,7 @@ function pBuilder() {
     <button class="btn sm" data-a="bSwap" ${B.sel.size ? '' : 'disabled'} title="Tick 2 people to swap their schedules, or tick anyone to swap this week with next week">⇄ Swap</button>
     <button class="btn sm" data-a="bClear" ${B.sel.size ? '' : 'disabled'}>Set selected to Off</button>
     <span style="flex:1"></span></div>
-  <section class="panel" style="padding:0"><div class="tw" style="max-height:600px"><table class="btab"><thead><tr><th class="bn">Agent · ${ags.length}</th>${ds.map(d => `<th class="${d === TODAY ? 'today' : ''}">${W.DOW[dow(d)]}<span>${W.parse(d).getDate()}</span></th>`).join('')}<th>Paid hours</th><th>Shifts / off</th><th>Checks</th></tr></thead><tbody>
+  <section class="panel" style="padding:0"><div class="tw" id="bgrid" style="max-height:600px"><table class="btab"><thead><tr><th class="bn">Agent · ${ags.length}</th>${ds.map(d => `<th class="${d === TODAY ? 'today' : ''}">${W.DOW[dow(d)]}<span>${W.parse(d).getDate()}</span></th>`).join('')}<th>Paid hours</th><th>Shifts / off</th><th>Checks</th></tr></thead><tbody>
     ${ags.map((a, i) => { const k = bChecks(a, ds); return bGroupHead(ags, i, ds.length + 4) + `<tr class="${B.sel.has(a.id) ? 'rsel' : ''}"><td class="bn"><label><input type="checkbox" data-a="bSel" data-v="${a.id}" ${B.sel.has(a.id) ? 'checked' : ''}><span class="nm">${esc(a.name)}</span></label><button class="bcopy" data-a="bCopyRow" data-v="${a.id}" title="Copy this row">⧉</button>${B.clip && B.clip.id !== a.id ? `<button class="bcopy" data-a="bPasteOne" data-v="${a.id}" title="Paste ${esc(B.clip.name)}'s row here">⤓</button>` : ''}</td>
       ${ds.map(d => cell(a, d)).join('')}<td class="n num">${k.hrs.toFixed(1)}</td><td class="n num">${k.shifts} / ${k.off}</td><td>${k.warn.length ? `<span class="pill bad" title="${esc(k.warn.join(' · '))}">⚠ ${k.warn.length}</span>` : '<span class="pill ok">✓</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${ds.length + 4}"><div class="empty">No active people in this station.</div></td></tr>`}
   </tbody></table></div></section>
@@ -4295,6 +4386,28 @@ function bSet(batch, id, d, code) {      // code null = reset to captured/patter
 const bChanges = () => [...new Set([...Object.keys(B.draft), ...Object.keys(B.brk), ...Object.keys(B.tags)])].map(k => { const [id, d] = k.split('|'), sw = B.swp[k]; return { id, d, code:B.draft[k], breaks:B.brk[k], tag:B.tags[k], dayStart:B.spans[k]?.[0],dayEnd:B.spans[k]?.[1], fullDay:B.tags[k]!==undefined, swap:sw && sw.code === B.draft[k] ? sw.with : null }; });
 function bApply(batch) { const inv = []; batch.slice().reverse().forEach(x => { const [t, k, prev] = x.length === 3 ? x : ['c', x[0], x[1]], store = t === 'b' ? B.brk : t === 't' ? B.tags : t==='s'?B.spans:B.draft; inv.push([t, k, store[k]]); if (prev === undefined) delete store[k]; else store[k] = prev; }); return inv; }
 function bCommit(batch) { if (batch.length) { B.undo.push(batch); B.redo = []; } }
+/* unpublished builder drafts survive a reload, a closed tab or an expired sign-in: kept in this browser per user and put back the next
+   time Edit schedules opens. Past days and people no longer loaded are left out; people still loading stay saved for the next try. */
+const DRAFT_KEY = () => 'wft.draft.' + (DB.profile ? DB.profile.id : 'local');
+function bKeepDraft() {
+  try { const left = B.draftLeft || {}, has = o => Object.keys(o || {}).length;
+    if (!B.restored && !has(B.draft) && !has(B.brk) && !has(B.tags)) return;   // nothing edited yet and the saved copy not offered back yet: keep it
+    if (!has(B.draft) && !has(B.brk) && !has(B.tags) && !has(left.draft) && !has(left.brk) && !has(left.tags)) return localStorage.removeItem(DRAFT_KEY());
+    const times = { ...(left.times || {}) }; Object.values(B.draft).forEach(c => { const x = W.SHIFTS[c]; if (x) times[c] = [x.s, x.e]; });
+    const m = (a, b) => ({ ...(b || {}), ...a });
+    localStorage.setItem(DRAFT_KEY(), JSON.stringify({ at:new Date().toISOString(), draft:m(B.draft, left.draft), brk:m(B.brk, left.brk), tags:m(B.tags, left.tags), spans:m(B.spans, left.spans), times })); } catch (e) {}
+}
+function bRestoreDraft() {
+  if (B.restored) return; let o = null; try { o = JSON.parse(localStorage.getItem(DRAFT_KEY()) || 'null'); } catch (e) {}
+  if (!o || Date.now() - new Date(o.at) > 14 * 864e5) return; if (Object.keys(B.draft).length || Object.keys(B.brk).length) return;
+  B.restored = true; const left = { draft:{}, brk:{}, tags:{}, spans:{}, times:o.times || {} }; let n = 0;
+  const keys = new Set([...Object.keys(o.draft || {}), ...Object.keys(o.brk || {}), ...Object.keys(o.tags || {})]);
+  keys.forEach(k => { const [id, d] = k.split('|'); if (d < TODAY) return;
+    if (!W.AGI[id]) { ['draft','brk','tags','spans'].forEach(f => { if (o[f] && o[f][k] !== undefined) left[f][k] = o[f][k]; }); return; }
+    let c = (o.draft || {})[k]; if (c !== undefined && c !== 'OFF' && !W.SHIFTS[c]) { const t = (o.times || {})[c]; if (!t) return; c = W.ensureTemplate(t[0], t[1], undefined, true); }
+    if (c !== undefined) B.draft[k] = c; if ((o.brk || {})[k] !== undefined) B.brk[k] = o.brk[k]; if ((o.tags || {})[k] !== undefined) B.tags[k] = o.tags[k]; if ((o.spans || {})[k] !== undefined) B.spans[k] = o.spans[k]; n++; });
+  B.draftLeft = left; if (n) setTimeout(render); if (n) toast(`${n} unpublished change${n === 1 ? '' : 's'} from your last visit restored as a draft. Review, then publish or discard.`);
+}
 function bPaintCell(td) {
   if (!B.paint || td.dataset.done) return; td.dataset.done = 1;
   bSet(B.paint, td.dataset.id, td.dataset.d, B.tool);
@@ -4396,13 +4509,15 @@ const gBreaks = (a, d) => B.brk[bKey(a.id, d)] ?? W.breaksOf(a, d, bCode(a, d));
 const gLbl = m => { const acc = (W.LOB[B.lobs[0]] || {}).acc || (S.acc === 'all' ? W.ACCOUNTS[0].id : S.acc); const ms = W.toUtcMs(acc,B.gday,m); const zone = B.tz ? TZS[B.tz][0] : W.zoneOf(acc), t = W.clockInZone(zone,ms), h = Math.floor(t.clock/60); return (h%12 || 12)+(h<12?'AM':'PM')+(t.day > B.gday?' +1d':t.day < B.gday?' −1d':''); };
 function gInterval(d, ags) {                 // staffed (not on break, not on leave) vs required, per 15 min
   const N = (GH1 - GH0) * 4, have = Array(N).fill(0), base = Array(N).fill(0);
-  ags.forEach(a => {
-    const code = bCode(a, d), bc = W.baseCode(a, d);
-    if (bc !== 'OFF') { const x = W.SHIFTS[bc]; for (let i = 0; i < N; i++) { const m = GH0 * 60 + i * 15 + 7; if (m >= x.s && m < x.e) base[i]++; } }
-    if (code === 'OFF' || bLocked(a, d)) return;
-    const x = W.SHIFTS[code], br = gBreaks(a, d);
-    for (let i = 0; i < N; i++) { const m = GH0 * 60 + i * 15 + 7; if (m >= x.s && m < x.e && !br.some(b => m >= b[0] && m < b[1])) have[i]++; }
-  });
+  /* the timeline also shows last night's crew after midnight and tomorrow's early starters in the +1 day tail: shifts from the day before
+     and the day after are counted in the minutes they overlap this day's timeline */
+  ags.forEach(a => [-1, 0, 1].forEach(off => {
+    const dd = W.addD(d, off), sh = off * 1440, code = bCode(a, dd), bc = W.baseCode(a, dd);
+    if (bc !== 'OFF') { const x = W.SHIFTS[bc]; for (let i = 0; i < N; i++) { const m = GH0 * 60 + i * 15 + 7 - sh; if (m >= x.s && m < x.e) base[i]++; } }
+    if (code === 'OFF' || bLocked(a, dd)) return;
+    const x = W.SHIFTS[code], br = gBreaks(a, dd);
+    for (let i = 0; i < N; i++) { const m = GH0 * 60 + i * 15 + 7 - sh; if (m >= x.s && m < x.e && !br.some(b => m >= b[0] && m < b[1])) have[i]++; }
+  }));
   const keys=[...new Set(ags.map(a=>a.key))],known=keys.every(k=>Object.prototype.hasOwnProperty.call(OPS.hourlyReferences,k)),reference=known?keys.reduce((n,k)=>n+Number(OPS.hourlyReferences[k]),0):0;return have.map((h,i)=>({h,req:base[i]?reference:0,known}));
 }
 let BULK={preview:null};
@@ -4459,7 +4574,7 @@ function ganttView(ags) {
   };
   return `<div class="gtop"><select class="in" data-f="gTz" aria-label="Timeline time zone" ${new Set(ags.map(a => W.zoneOf(a.acc))).size > 1 ? 'disabled' : ''} style="width:auto">${TZS.map(([n], i) => `<option value="${i}" ${B.tz === i ? 'selected' : ''}>${i === 0 ? 'Account schedule time · ' + [...new Set(ags.map(a => W.zoneOf(a.acc)))].join(', ') : n}</option>`).join('')}</select>
       <button class="btn sm" data-a="gDay" data-v="-1">‹</button><b class="num">${fmtD(d, { weekday:'long', month:'short', day:'numeric' })}</b><button class="btn sm" data-a="gDay" data-v="1">›</button><button class="btn sm ghost" data-a="gDay" data-v="0">Today</button>
-      <span class="pill ${draftPeople ? 'warn' : 'ok'}"><i></i>Published ${ags.length - draftPeople}/${ags.length}</span><span class="meta" title="Publishing includes activities with the updated connection">Shift times, notes & activities</span><button class="btn sm pri" data-a="bulkActivities">Bulk breaks & lunch</button><button class="btn sm" data-a="brPost">💬 Post breaks to Teams</button><span class="pill ${short ? 'warn' : 'ok'}"><i></i>${!iv.every(x=>x.known)?'Staffing minimum not set':short?short*15+' min below saved reference':'At or above saved reference'}</span><span class="meta">${sched} scheduled</span>
+      <span class="pill ${draftPeople ? 'warn' : 'ok'}"><i></i>Published ${ags.length - draftPeople}/${ags.length}</span><span class="meta" title="Publishing includes activities with the updated connection">Shift times, notes & activities</span><button class="btn sm pri" data-a="bulkActivities">Bulk breaks & lunch</button><button class="btn sm" data-a="brPost">💬 Copy breaks for Teams</button><span class="pill ${short ? 'warn' : 'ok'}"><i></i>${!iv.every(x=>x.known)?'Staffing minimum not set':short?short*15+' min below saved reference':'At or above saved reference'}</span><span class="meta">${sched} scheduled</span>
       <span style="flex:1"></span><span class="glegend"><i class="lg-brk"></i>Break<i class="lg-lun"></i>Lunch<i class="lg-busy"></i>Busy<i class="lg-ooo"></i>Out of office<i class="lg-cl"></i>Closed</span></div>
     <div class="gwrap" id="gwrap" data-day="${d}" data-scope="${esc(B.lobs.join('|'))}"><div class="ginner" style="width:${W0 + 300}px">
       <div class="grow2 ghead"><div class="gname"><b>Name</b></div><div class="ghrs"><b>Paid hours</b></div><div class="gaxis" style="width:${W0}px">${Array.from({ length:GH1 - GH0 }, (_, h) => `<span style="left:${h * GPX}px">${gLbl((GH0 + h) * 60)}</span>`).join('')}</div></div>
@@ -4495,9 +4610,9 @@ function timelineEdgeSpeed(pointer,left,right){const edge=60;if(pointer>right-ed
 function previewTimelineDrag(){
  const o=G.op,w=$('gwrap');if(!o||!w)return;
  const raw=Math.round((o.pointerX-o.x0+w.scrollLeft-o.scroll0)/GPX*60/15)*15;
- const dm=o.kind==='bar'?Math.max(GH0*60-o.s,Math.min(GH1*60-o.e,raw)):raw;if(dm)o.moved=true;
+ const dm=o.kind==='bar'?Math.max(GH0*60-o.s,Math.min(GH1*60-o.e,1425-o.s,raw)):raw;   // a shift must start on its own day (by 23:45); later starts belong to the next dayif(dm)o.moved=true;
  let s2=o.s,e2=o.e;
- if(o.kind==='bar'){s2+=dm;e2+=dm;}else if(o.kind==='l')s2=Math.max(GH0*60,Math.min(o.e-120,o.s+dm));else if(o.kind==='r')e2=Math.min(GH1*60,Math.max(o.s+120,o.e+dm));
+ if(o.kind==='bar'){s2+=dm;e2+=dm;}else if(o.kind==='l')s2=Math.max(GH0*60,Math.min(o.e-120,1425,o.s+dm));else if(o.kind==='r')e2=Math.min(GH1*60,Math.max(o.s+120,o.e+dm));
  if(o.kind==='brk'){const b=o.br[o.i],length=b[1]-b[0],start=Math.max(o.s,Math.min(o.e-length,b[0]+dm)),el=o.bar.querySelector(`[data-i="${o.i}"]`);el.style.left=(gX(start)-gX(o.s))+'px';o.nb=[start,start+length];return;}
  o.ns=s2;o.ne=e2;o.bar.style.left=gX(s2)+'px';o.bar.style.width=(gX(e2)-gX(s2))+'px';o.bar.querySelector('.gt').textContent=`${W.hm(s2)}–${W.hm(e2)}`;
 }
@@ -4539,12 +4654,12 @@ function brCard(key, d, target) {
 }
 function brDrawer() {
   const key = B.lobs[0], d = B.gday, acc = W.LOB[key].acc, chat = W.NOTIFY.routes[acc] || '', dr = Object.keys(B.draft).length + Object.keys(B.brk).length, tg = B.brT || 'group';
-  open('Post breaks to Teams', `<p class="sub" style="margin-bottom:10px">Sends the break and lunch plan as a Teams message. <b>Nothing changes in Shifts.</b></p>
+  open('Copy breaks for Teams', `<p class="sub" style="margin-bottom:10px">Copies the break and lunch plan so you can paste it in a Teams chat. Nothing is sent automatically. <b>Nothing changes in Shifts.</b></p>
     ${dr ? '<div class="note warn" style="margin-bottom:10px">You have unpublished changes. The post uses the <b>published</b> schedule, so publish first if they should be included.</div>' : ''}
     <div class="field"><label class="f">Send to</label><div class="seg">${[['group','Station group chat'],['personal','Each agent privately'],['both','Both']].map(([k, l]) => `<button class="${tg === k ? 'on' : ''}" data-a="brT" data-v="${k}">${l}</button>`).join('')}</div></div>
     ${tg !== 'personal' ? `<div class="field"><label class="f" for="brChat">Group chat</label><select class="in" id="brChat" style="width:100%">${W.CHATS.map(c => `<option ${c === chat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>` : ''}
     ${B.lobs.length > 1 ? `<div class="note" style="margin-bottom:10px">${B.lobs.length} stations selected: one message per station. Preview shows ${esc(W.LOB[key].name)}.</div>` : ''}<label class="f">Preview</label>${brCard(key, d, tg === 'personal' ? 'personal' : 'group')}${tg === 'both' ? '<div style="height:8px"></div>' + brCard(key, d, 'personal') : ''}`,
-    `<button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="brGo">Post to Teams</button>`);
+    `<button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="brGo">Copy plan</button>`);
 }
 const GED={id:null,day:null,s:0,e:0,rows:[]};
 function readActivityEditor(){const t=v=>{if(!/^\d{2}:\d{2}$/.test(v))throw Error('Set valid shift and activity start times.');const [h,m]=v.split(':').map(Number);return h*60+m;};GED.s=t($('geS').value);GED.e=t($('geE').value);if(GED.e<=GED.s)GED.e+=1440;GED.rows=[...document.querySelectorAll('.activity-row')].map(el=>{const i=+el.dataset.i;let start=t($('ga'+i+'s').value);if(start<GED.s&&GED.e>1440)start+=1440;const duration=Number($('ga'+i+'duration').value);return [start,start+duration,$('ga'+i+'type').value,$('ga'+i+'paid').value==='yes',$('ga'+i+'name').value.trim(),$('ga'+i+'code').value.trim(),$('ga'+i+'theme').value];});}
@@ -4615,7 +4730,11 @@ const A = {
     if (!DEV) { S.lgErr = 'This copy is not connected to the database.'; return render(); }
     const u = W.login(em); if (!u) { S.lgErr = 'No active account with that email. Ask your WFM admin to create one.'; return render(); }
     S.lgErr = ''; S.auth = true; S.acc = u.scope.includes('all') ? 'all' : u.scope[0]; S.page = 'home'; render(); },
-  logout: async () => { W.audit('Access', 'Signed out', W.ME.email, '', '', ''); if (DB.on) { await dbFlush(); await DB.sb.auth.signOut(); DB.on = false; DB.profile = null; DB.users = null; } S.auth = false; S.lgEmail = ''; render(); },
+  logout: async () => { W.audit('Access', 'Signed out', W.ME.email, '', '', '');
+    if (DB.on) { clearTimeout(DB.dt); clearTimeout(DB.ct); clearTimeout(DB.t); await Promise.all([dbFlushDays(), dbFlushChanges(), dbFlush()]);
+      if (dbPending() && !confirm(`${dbPending()} change${dbPending() === 1 ? ' has' : 's have'} not reached the database yet. They stay on this computer and are saved at your next sign-in. Sign out anyway?`)) return;
+      S.leaving = true; await DB.sb.auth.signOut(); location.reload(); return; }
+    S.auth = false; S.lgEmail = ''; render(); },
   setPw: async () => { const a = $('npA').value, b = $('npB').value;
     if (a.length < 12) { S.lgErr = 'Use at least 12 characters.'; return render(); }
     if (a !== b) { S.lgErr = 'The two passwords don\'t match.'; return render(); }
@@ -4648,7 +4767,11 @@ const A = {
     S.lgErr = sb ? 'Type your email first, then click Forgot password.' : 'Password resets are done by your WFM admin (Users & access → Reset password).'; render(); },
   brPost: () => brDrawer(),
   brT: el => { B.brT = el.dataset.v; brDrawer(); },
-  brGo: () => { const tg = B.brT || 'group', chat = $('brChat') ? $('brChat').value : ''; const n = B.lobs.reduce((t, k) => t + W.postBreaks(k, B.gday, tg, chat), 0); close(); toast(`Breaks posted to Teams · ${n} agents${B.lobs.length > 1 ? ' · one message per station (' + B.lobs.length + ')' : ''}${tg !== 'personal' ? ' · ' + chat : ''}${tg !== 'group' ? ' · personal messages' : ''}`); },
+  brGo: async () => { const tg = B.brT || 'group', chat = $('brChat') ? $('brChat').value : '', t = m => m == null ? '' : W.hm(m);
+    const text = B.lobs.map(k => `Breaks & lunch · ${W.LOB[k].name} · ${fmtD(B.gday)}\n` + W.breakPlan(k, B.gday).map(x => `${x.a.name} · ${W.shiftLabel(x.code)} · ` + x.br.map(b => `${b[4] || b[2] || 'Break'} ${t(b[0])}–${t(b[1])}`).join(', ')).join('\n')).join('\n\n');
+    try { await navigator.clipboard.writeText(text); } catch (e) { return toast('Could not copy. Allow clipboard access for this site and try again.'); }
+    const n = B.lobs.reduce((s, k) => s + W.postBreaks(k, B.gday, tg, chat), 0); close();
+    toast(`Break plan copied · ${n} agents. Paste it in ${tg === 'personal' ? 'each agent’s chat' : chat || 'the Teams chat'} (nothing is sent automatically).`); },
   navSec: el => { const k = el.dataset.v; S.navCol[k] = el.getAttribute('aria-expanded') === 'true'; try { localStorage.setItem('wft.navcol', JSON.stringify(S.navCol)); } catch (e) {} el.classList.toggle('col',S.navCol[k]);el.setAttribute('aria-expanded',String(!S.navCol[k]));if(el.nextElementSibling?.classList.contains('navitems'))el.nextElementSibling.hidden=S.navCol[k]; },
   rail: () => { S.rail = !S.rail; try { localStorage.setItem('wft.rail', S.rail ? '1' : '0'); } catch (e) {} render(); },
   cmdOpen: () => cmdOpen(),
@@ -4719,7 +4842,7 @@ const A = {
   bClear: () => { const b = []; B.sel.forEach(id => bDays().forEach(d => bSet(b, id, d, 'OFF'))); bCommit(b); render(); },
   bUndo: () => { const b = B.undo.pop(); if (!b) return; B.redo.push(bApply(b)); render(); },
   bRedo: () => { const b = B.redo.pop(); if (!b) return; B.undo.push(bApply(b)); render(); },
-  bDiscard: () => { B.draft = {}; B.brk = {}; B.tags = {}; B.spans={}; B.undo = []; B.redo = []; toast('Draft discarded'); render(); },
+  bDiscard: () => { const n = Object.keys(B.draft).length + Object.keys(B.brk).length; if (n && !confirm(`Discard ${n} unpublished change${n === 1 ? '' : 's'}? This cannot be undone.`)) return; B.draftLeft = null; B.draft = {}; B.brk = {}; B.tags = {}; B.spans={}; B.undo = []; B.redo = []; toast('Draft discarded'); render(); },
   bNewT: () => { B.newT = !B.newT; render(); },
   bNewSave: () => { const t = v => { const [h, m] = v.split(':').map(Number); return h * 60 + m; }; if (!$('bNs').value || !$('bNe').value || $('bNs').value === $('bNe').value) return toast('Set a start and an end time');
     const code = W.saveTemplate(t($('bNs').value), t($('bNe').value)); B.tool = code; B.newT = false; toast(`${W.shiftLabel(code)} saved${DB.on ? ' for everyone' : ''} · ★ in the palette`); render(); },
@@ -4830,6 +4953,8 @@ const A = {
   pickAg: el => { el.checked ? S.picked.add(el.dataset.v) : S.picked.delete(el.dataset.v); render(); },
   scheduleDetail: el => scheduleDetail(el.dataset.id,el.dataset.d),
   scheduleRefresh: () => refreshScheduleReads(),
+  backupNow: async () => { DB.backupBusy = true; render(); const { data, error } = await DB.sb.rpc('wft_backup_now').then(r => r, e => ({ error:e })); DB.backupBusy = false;
+    toast(error ? 'Backup not taken: ' + error.message : `Backup taken · ${data.tables} tables · ${Number(data.rows).toLocaleString()} rows`); if (!error) W.audit('Settings', 'Backup taken', 'Database', '', `${data.tables} tables`, 'Back up now'); DB.backup = undefined; render(); },
   cell: el => cellEditor(el.dataset.id, el.dataset.d),
   saveCell: el => { const id = el.dataset.id, d = el.dataset.d, s = W.sched(W.AGI[id], d), code = $('edCode').value, reason = $('edAbs').value, rem = $('edRem').value.trim(), ch = {};
     if (code !== s.code) ch.code = code;
