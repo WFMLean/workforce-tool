@@ -1494,11 +1494,35 @@ function mergeDayShifts(list) {
   const main=blocks.reduce((a,b)=>!a||b.e-b.s>a.e-a.s?b:a,null);
   return {main,others:blocks.filter(b=>b!==main)};
 }
-/* overtime on a shift day: OT shifts read from Teams (merged into the day) plus activities named OT or Overtime. Minutes; overlaps count once. */
-function otMinutes(a, d) {
-  const s = sched(a, d); if (!s.working) return 0; const o = OV[kOf(a.id, d)] || {}, acts = o.breaks && o.breaksFor === s.code ? o.breaks : [];
-  const iv = [...(s.remoteOT || []), ...acts.filter(b => OT_RX.test(String(b[4] || '')) || b[5] === 'OT').map(b => [b[0], b[1]])].sort((x, y) => x[0] - y[0]);
-  let t = 0, end = -Infinity; iv.forEach(([x, y]) => { if (y <= end) return; t += y - Math.max(x, end); end = y; }); return t;
+/* overtime on a shift day: OT shifts read from Teams (merged into the day) plus activities named OT or Overtime.
+   Intervals in shift minutes, merged so overlaps count once. */
+function otIntervals(a, d) {
+  const s = sched(a, d); if (!s.working) return []; const o = OV[kOf(a.id, d)] || {}, acts = o.breaks && o.breaksFor === s.code ? o.breaks : [];
+  const out = []; [...(s.remoteOT || []), ...acts.filter(b => OT_RX.test(String(b[4] || '')) || b[5] === 'OT').map(b => [b[0], b[1]])].sort((x, y) => x[0] - y[0])
+    .forEach(([x, y]) => { const l = out[out.length - 1]; if (l && x <= l[1]) l[1] = Math.max(l[1], y); else out.push([x, y]); });
+  return out;
+}
+function otMinutes(a, d) { return otIntervals(a, d).reduce((t, [x, y]) => t + y - x, 0); }
+/* overtime report. Scheduled = paid minutes of working days (full-day leave excluded). OT worked = login minutes inside the OT window,
+   only on days with imported logins. Weeks over the limit = Monday–Sunday paid hours above maxWeek inside the period. */
+function otStats(f) {
+  const maxWeek = (f.maxWeek || 48) * 60, mk = k => ({ k, otM:0, schedM:0, days:0, people:new Set(), logM:0, knownM:0 });
+  const T = { ...mk('T'), weeksOver:0, scheduled:new Set() }, byLob = {}, byTL = {}, byDay = {}, byAg = [], byDow = [0, 1, 2, 3, 4, 5, 6].map(i => ({ k:i, otM:0, days:0 }));
+  const bump = (o, a, sm, om, w, known) => { o.schedM += sm; if (!om) return; o.otM += om; o.days++; o.people.add(a.id); if (known) { o.logM += w; o.knownM += om; } };
+  AG.filter(a => !a.inactive && (!f.acc || f.acc === 'all' || a.acc === f.acc) && (!f.lob || f.lob === 'all' || a.key === f.lob) && (!f.keys || f.keys.has(a.key))).forEach(a => {
+    const g = { a, otM:0, schedM:0, days:0, logM:0, knownM:0, maxDay:0, last:'', weeksOver:0, list:[] }, wk = {};
+    range(f.from, f.to).forEach(d => {
+      const s = sched(a, d); if (!s.working || fullOff(s)) return; const sm = paidMin(a, d, s.code), iv = otIntervals(a, d), om = iv.reduce((t, [x, y]) => t + y - x, 0);
+      const known = !!om && loginKnown(a, d); let w = 0; if (known) { const ses = logins(a, d); iv.forEach(([x, y]) => ses.forEach(z => { w += Math.max(0, Math.min(z.o, y) - Math.max(z.i, x)); })); }
+      wk[weekStart(d)] = (wk[weekStart(d)] || 0) + sm; T.scheduled.add(a.id);
+      [T, byLob[a.key] = byLob[a.key] || mk(a.key), byTL[a.tl || '—'] = byTL[a.tl || '—'] || mk(a.tl || '—')].forEach(o => bump(o, a, sm, om, w, known));
+      g.schedM += sm; if (!om) return;
+      (byDay[d] = byDay[d] || mk(d)); bump(byDay[d], a, 0, om, w, known); byDow[dow(d)].otM += om; byDow[dow(d)].days++;
+      g.otM += om; g.days++; g.maxDay = Math.max(g.maxDay, om); g.last = d; if (known) { g.logM += w; g.knownM += om; } g.list.push({ d, s, iv, om, w, known });
+    });
+    g.weeksOver = Object.values(wk).filter(m => m > maxWeek).length; T.weeksOver += g.weeksOver; if (g.otM || g.weeksOver) byAg.push(g);
+  });
+  return { T, byLob, byTL, byDay, byDow, byAg:byAg.sort((x, y) => y.otM - x.otM || y.weeksOver - x.weeksOver) };
 }
 const otRows = b => b.ot.map(o => [o[0], o[1], 'activity', true, 'OT', 'OT', 'purple']);
 const keep = (arr, f) => { const k = arr.filter(f); arr.length = 0; arr.push(...k); };
@@ -2205,7 +2229,7 @@ global.WF = {
   sched, baseCode, patOn, shiftLabel, shiftShort, ensureTemplate, patternFromAgent, allocation, setAlloc, login, createUser, setUser, resetPw,
   LOCNAME, LOCF, locOf, setLoc: v => { LOCF.v = v; emit(); }, breakPlan, postBreaks, publishDraft, defaultBreaks, breaksOf, paidMin, ARCHIVE, removeAccount, restoreAccount, inactiveFlags, setInactive, clearInactiveShifts, ROSTERS, importRoster, enrichFromRoster, loginKnown, importLogins, importTimesheet, isProjected, rollPreview, runRoll, setPub, tShort, swapVerdict, processSwap, acceptSwap,
   swapMap, swapCheck, decideSwap, setSwapRule, swapDates,
-  rcode, fullOff, otMinutes, setReason, savePatternTimes, scheduleAudit, whatIf, addAccount,
+  rcode, fullOff, otMinutes, otIntervals, otStats, setReason, savePatternTimes, scheduleAudit, whatIf, addAccount,
   diffAgainst, teamsDiff, applyDiff, outList, sendNotify, logins, adh, lateComparison, live, cov, reqCoverage, worst, verdict, absStats, adhStats,
   approve, deny, editCell, assignPattern, publishAll, retry, setCfg, savePattern, audit, absPatterns, buildFacts, setArrival, applySavedArrivals, arrivalOf, onArrival: f => ARR_HOOKS.push(f), isLate, lateRuleText, applyRules, saveTemplate, applySavedTemplates, onTemplate: f => TEMPLATE_HOOKS.push(f),
   onChange: f => listeners.push(f), onAudit: f => AUD_HOOKS.push(f),
@@ -2219,7 +2243,7 @@ global.WF = {
 const W = WF, { esc, fmtS, fmtD, hm, addD, range, weekStart, TODAY, dow, pct, fmtPct, dur, initials } = W;
 const $ = id => document.getElementById(id);
 const S = { patMin:2, co:{ f:'all', t:'all' }, chk:{ acc:'', type:'open', q:'', page:0 }, rs:{ view:'people', lobs:[], lead:'all', st:'active', q:'', page:0, ws:weekStart(TODAY), gaps:false }, pv:{ from:weekStart(TODAY), to:addD(weekStart(TODAY), 6), lobs:[], type:'all', q:'', page:0, open:null }, spk:null, spkQ:'', navCol:(() => { try { return {Schedules:true,People:true,Reports:true,Settings:true,...JSON.parse(localStorage.getItem('wft.navcol') || '{}')}; } catch (e) { return {}; } })(), rail:(() => { try { return localStorage.getItem('wft.rail') === '1'; } catch (e) { return false; } })(), loc:'all', npLen:7, swTab:'Pending approval', swSel:null, swNote:'', auWk:1, auF:'all', auPick:new Set(), wi:{}, auth:false, page:'home', srcTab:'roster', td:{}, lgEmail:'', lgErr:'', acc:'all', liveF:'attention', sel:null, reqTab:'Pending', note:'', lob:'CRN|IAH', from:weekStart(TODAY), picked:new Set(),
-  adhP:7, adhG:'day', adhW:8, adhMo:3, adhLob:'all', absW:8, absG:'week', absMo:3, absLob:'all', aud:{ mod:'all', user:'all', q:'', days:30, page:0 } };
+  adhP:7, adhG:'day', adhW:8, adhMo:3, adhLob:'all', otG:'week', otP:14, otW:8, otMo:3, otPg:0, absW:8, absG:'week', absMo:3, absLob:'all', aud:{ mod:'all', user:'all', q:'', days:30, page:0 } };
 try { const t = localStorage.getItem('wft.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 
 /* ---------- helpers ---------- */
@@ -2231,6 +2255,7 @@ const ICONS = {
   schedule:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M7 13h3M7 17h3M14 13h3"/>',
   adherence:'<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   abs:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  ot:'<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/>',
   roster:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.6c1.9.7 3.1 2.5 3.5 5.4"/>',
   shiftchk:'<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
   planvs:'<path d="M4 6h7M4 12h7M4 18h7"/><path d="M15 6h5M15 12h5M15 18h5" stroke-dasharray="2 2"/><path d="M12 4v16"/>',
@@ -2382,17 +2407,17 @@ function signin() {
         <div class="si-pow">POWERED BY<b>Lean Solutions Group</b></div></div></section></div>`;
 }
 const OPS = {budgets:[], pages:{}, balances:[], reasons:[], allocations:{}, hourlyReferences:{}, dailyReferencePct:null, clockSource:null};
-const UX = {auditStations:[], absStations:[], adhStations:[], pickerDraft:null, budgetAccount:null, budgetScope:'site', budgetGroup:null, balanceImport:null, balanceErrors:[]};
+const UX = {auditStations:[], absStations:[], adhStations:[], otStations:[], pickerDraft:null, budgetAccount:null, budgetScope:'site', budgetGroup:null, balanceImport:null, balanceErrors:[]};
 const NAV = [
   ['Today', [['home','Start here'],['overview','Account summary'],['live','Who is working now'],['requests','Review leave requests'],['swaps','Review shift swaps']]],
   ['Schedules', [['builder','Edit schedules'],['schedule','View schedules'],['shiftchk','Compare with Teams Shifts'],['schaudit','Find schedule problems'],['allocation','Absence budgets & balances'],['whatif','Try staffing changes']]],
   ['People', [['roster','People & teams'],['inactive','People who have left']]],
-  ['Reports', [['adherence','Adherence & work hours'],['abs','Absence report'],['planvs','Schedule changes'],['audit','Activity history']]],
+  ['Reports', [['adherence','Adherence & work hours'],['abs','Absence report'],['ot','Overtime report'],['planvs','Schedule changes'],['audit','Activity history']]],
   ['Settings', [['sources','Import people & teams'],['exempt','Absence reasons'],['notify','Team notifications'],['connect','Connected services'],['users','Users & access'],['settings','Tool settings']]],
   ['Help', [['help','How to use this tool']]]
 ];
 const PAGES = NAV.flatMap(x => x[1]);
-const ROLE_PAGES = { RTA:['overview','live','requests','swaps','builder','schedule','roster','shiftchk','schaudit','inactive','allocation','whatif','adherence','abs','planvs','exempt','notify','audit'], 'Team lead':['live','requests','swaps','builder','schedule','roster','shiftchk','schaudit','inactive','adherence','abs','planvs','exempt'], Executive:['overview','roster','whatif','adherence','abs','planvs','audit'] };
+const ROLE_PAGES = { RTA:['overview','live','requests','swaps','builder','schedule','roster','shiftchk','schaudit','inactive','allocation','whatif','adherence','abs','ot','planvs','exempt','notify','audit'], 'Team lead':['live','requests','swaps','builder','schedule','roster','shiftchk','schaudit','inactive','adherence','abs','ot','planvs','exempt'], Executive:['overview','roster','whatif','adherence','abs','ot','planvs','audit'] };
 const roleCan = (role,k) => ['home','help'].includes(k) || !ROLE_PAGES[role] || ROLE_PAGES[role].includes(k);
 const canSee = k => roleCan(W.ME.role,k) && (['home','help'].includes(k) || !OPS.pages[W.ME.email] || OPS.pages[W.ME.email].includes(k));
 const isAdmin = () => W.ME.role === 'Admin';
@@ -2499,7 +2524,7 @@ function shell() {
         <span class="sp"></span><span id="syncPill">${syncPill()}</span>
         <button class="btn sm" data-a="pageHelp">Help with this page</button><button class="btn sm ghost" data-a="theme" aria-label="Switch theme">◐</button>
         <span class="user" title="${esc(W.ME.name)} · ${esc(W.ME.role)}"><span class="av">${initials(W.ME.name)}</span><span class="un">${esc(W.ME.name.split(' ')[0] === W.ME.name ? W.ME.name : W.ME.name)}<small>${esc(W.ME.role)}</small></span></span><button class="btn sm ghost" data-a="logout" title="Sign out" aria-label="Sign out">Sign out</button></div>
-      <main id="main">${pageIntro()}${cacheNotice()}${['live','overview'].includes(S.page) ? timeZonePanel() : ''}${({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
+      <main id="main">${pageIntro()}${cacheNotice()}${['live','overview'].includes(S.page) ? timeZonePanel() : ''}${({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
     </div></div>`;
 }
 
@@ -2922,6 +2947,50 @@ function absAgent(id) {
   open(`${esc(a.name)} · absence record`, `<p class="sub" style="margin-bottom:12px">${esc(lobName(a.key))} · TL ${esc(a.tl)} · ${g.pl} planned, ${g.un} unplanned days · Bradford ${g.bradford}</p>
     <table><thead><tr><th>Date</th><th>Reason</th><th>Remark · source</th></tr></thead><tbody>${g.rec.slice().reverse().map(x => `<tr><td class="num">${fmtD(x.d)}</td><td>${abTag(x.reason)}</td><td class="meta">${esc(x.remark)}${x.remark ? ' · ' : ''}${esc(x.source)}</td></tr>`).join('')}</tbody></table>`, `<button class="btn" data-a="close">Close</button>`);
 }
+/* ---------- OVERTIME ---------- */
+/* Overtime = OT shifts read from Teams (label or note starting OT / Overtime, merged into the day) plus OT / Overtime activities in the tool.
+   Hours are scheduled overtime; "OT worked" checks the logins inside the OT window on days with imported logins. */
+function otRange() { const g = S.otG || 'week'; return periodRange(g, g === 'month' ? S.otMo : g === 'week' ? S.otW : S.otP); }
+const otFilter = R => ({ from:R.from, to:R.to, acc:S.acc, keys:reportKeys(UX.otStations) });
+function pOT() {
+  const R = otRange(), grain = S.otG || 'week', O = W.otStats(otFilter(R)), T = O.T, H = m => (m / 60).toLocaleString(undefined, { maximumFractionDigits:1 });
+  const ahead = W.otStats({ ...otFilter(R), from:addD(TODAY, 1), to:addD(TODAY, 7) }).T, PT = R.per.map(pp => W.otStats({ ...otFilter(R), from:pp.s, to:pp.e }));
+  const lobs = Object.keys(O.byLob).filter(k => O.byLob[k].otM || PT.some(x => x.byLob[k] && x.byLob[k].otM)).sort(), maxCell = Math.max(1, ...PT.flatMap(x => Object.values(x.byLob).map(o => o.otM)));
+  const shade = m => m ? `background:color-mix(in srgb,#ad73d0 ${Math.round(12 + 40 * m / maxCell)}%,transparent)` : '', cell = o => !o || !o.otM ? '<td class="n meta">—</td>' : `<td class="n" style="${shade(o.otM)}">${H(o.otM)}<div class="meta">${o.people.size} ppl · ${fmtPct(pct(o.otM, o.schedM))}</div></td>`;
+  const worked = pct(T.logM, T.knownM), ags = O.byAg, pg = S.otPg || 0, tls = Object.values(O.byTL).filter(x => x.otM).sort((a, b) => b.otM - a.otM), dowMax = Math.max(1, ...O.byDow.map(x => x.otM));
+  return histNotice() + `<div class="head"><div class="grow"><div class="kicker">${fmtD(R.from)} – ${fmtD(R.to)} · overtime from Teams OT shifts and OT activities</div><h1><b>Overtime report</b></h1><p class="sub">OT hours = scheduled overtime: shifts in Teams labelled or noted <b>OT</b> / <b>Overtime</b>, plus OT or Overtime activities added in the tool. <b>OT %</b> = OT hours ÷ scheduled paid hours (full-day leave excluded). <b>OT worked</b> = minutes logged in during the OT window ÷ OT minutes, only on days with imported logins. <b>Weeks over 48 h</b> = Monday–Sunday scheduled paid hours above 48 inside this period.</p></div>
+    <div class="seg">${[['day','By day'],['week','By week'],['month','By month']].map(([k, t]) => `<button class="${grain === k ? 'on' : ''}" data-a="otG" data-v="${k}">${t}</button>`).join('')}</div>
+    <div class="seg">${grain === 'month' ? [[1,'This month'],[2,'2 months'],[3,'3 months']].map(([k, l]) => `<button class="${S.otMo === k ? 'on' : ''}" data-a="otMo" data-v="${k}">${l}</button>`).join('') : grain === 'week' ? [4, 8, 12].map(k => `<button class="${S.otW === k ? 'on' : ''}" data-a="otW" data-v="${k}">${k} weeks</button>`).join('') : [[7,'7 days'],[14,'14 days'],[30,'30 days']].map(([k, l]) => `<button class="${S.otP === k ? 'on' : ''}" data-a="otP" data-v="${k}">${l}</button>`).join('')}</div>
+    ${stationPick('overtime', spkLobs())}
+    <button class="btn" data-a="expOT">Export CSV</button></div>
+  <div class="strip">
+    <div><div class="l">OT hours</div><div class="v">${H(T.otM)}</div><div class="h">${T.days} OT shift${T.days === 1 ? '' : 's'} · avg ${T.days ? H(T.otM / T.days) : 0} h per OT shift</div></div>
+    <div><div class="l">OT % of scheduled hours</div><div class="v">${fmtPct(pct(T.otM, T.schedM))}</div><div class="h">${H(T.schedM)} scheduled paid hours</div></div>
+    <div><div class="l">People with OT</div><div class="v">${T.people.size}</div><div class="h">of ${T.scheduled.size} scheduled · ${fmtPct(pct(T.people.size, T.scheduled.size))}</div></div>
+    <div><div class="l">OT worked</div><div class="v ${worked == null ? '' : worked >= 90 ? 'ok' : 'warn'}">${worked == null ? '—' : fmtPct(worked)}</div><div class="h">${T.knownM ? H(T.logM) + ' of ' + H(T.knownM) + ' h with login data' : 'No login data for OT days'}</div></div>
+    <div><div class="l">Weeks over 48 h</div><div class="v ${T.weeksOver ? 'bad' : ''}">${T.weeksOver}</div><div class="h">person-weeks · see Agents</div></div>
+    <div><div class="l">OT booked next 7 days</div><div class="v">${H(ahead.otM)}</div><div class="h">${ahead.people.size} people · ${fmtD(addD(TODAY, 1))} – ${fmtD(addD(TODAY, 7))}</div></div></div>
+  <section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>OT hours by ${grain} and line of business</h2><p class="sub">Each cell: OT hours, people with OT, and OT as a % of that station's scheduled paid hours. Darker = more hours.${R.partial ? ` * Teams history starts ${fmtD(R.covFrom)}, so the first ${grain} is partial.` : ''}</p></div></div>
+    <div class="tw"><table><thead><tr><th>Account · LOB</th>${R.per.map(pp => `<th class="n">${esc(pp.label)}</th>`).join('')}<th class="n">Period</th></tr></thead><tbody>
+    ${lobs.map(k => `<tr><td class="nm">${esc(lobName(k))}</td>${PT.map(x => cell(x.byLob[k])).join('')}<td class="n"><b>${H(O.byLob[k].otM)}</b><div class="meta">${O.byLob[k].people.size} ppl · ${fmtPct(pct(O.byLob[k].otM, O.byLob[k].schedM))}</div></td></tr>`).join('') || `<tr><td colspan="${R.per.length + 2}"><div class="empty">No overtime in this period.</div></td></tr>`}
+    ${lobs.length ? `<tr><td class="nm"><b>Total</b></td>${PT.map(x => cell(x.T)).join('')}<td class="n"><b>${H(T.otM)}</b><div class="meta">${T.people.size} ppl · ${fmtPct(pct(T.otM, T.schedM))}</div></td></tr>` : ''}
+    </tbody></table></div></section>
+  <div class="cols c2" style="margin-bottom:14px">
+    <section class="panel"><h2 style="margin-bottom:8px">By team lead</h2><table><thead><tr><th>Team lead</th><th class="n">OT h</th><th class="n">People</th><th class="n">OT shifts</th><th class="n">OT %</th><th class="n">OT worked</th></tr></thead><tbody>
+      ${tls.map(x => `<tr><td>${esc(x.k)}</td><td class="n"><b>${H(x.otM)}</b></td><td class="n">${x.people.size}</td><td class="n">${x.days}</td><td class="n">${fmtPct(pct(x.otM, x.schedM))}</td><td class="n">${x.knownM ? fmtPct(pct(x.logM, x.knownM)) : '—'}</td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">No overtime in this period.</div></td></tr>'}</tbody></table></section>
+    <section class="panel"><h2 style="margin-bottom:8px">By weekday</h2><table><thead><tr><th>Day</th><th class="n">OT shifts</th><th class="n">OT h</th><th class="n">Share</th><th style="width:40%"></th></tr></thead><tbody>
+      ${O.byDow.map((x, i) => `<tr><td>${W.DOW[i]}</td><td class="n">${x.days}</td><td class="n">${H(x.otM)}</td><td class="n">${fmtPct(pct(x.otM, T.otM), 0)}</td><td><div class="bar"><b style="width:${x.otM / dowMax * 100}%;background:#ad73d0"></b></div></td></tr>`).join('')}</tbody></table>
+      <p class="foot-note">A weekday that carries most of the OT usually points at a coverage gap in the base schedule, not a one-off.</p></section></div>
+  <section class="panel"><div class="panel-h"><div class="grow"><h2>Agents</h2><p class="sub">Most OT hours first. Includes people with no OT who went over 48 scheduled hours in a week. Click an agent to see each OT day.</p></div></div>
+    <div class="tw"><table><thead><tr><th>Agent</th><th>LOB</th><th>Team lead</th><th class="n">OT shifts</th><th class="n">OT h</th><th class="n">Avg / shift</th><th class="n">Longest</th><th class="n">OT % of sched.</th><th class="n">OT worked</th><th class="n">Weeks &gt; 48 h</th><th>Last OT</th></tr></thead><tbody>
+    ${ags.slice(pg * 40, pg * 40 + 40).map(g => `<tr class="click" data-a="otAg" data-v="${g.a.id}"><td class="nm">${esc(g.a.name)}</td><td>${esc(lobName(g.a.key))}</td><td>${esc(g.a.tl || '—')}</td><td class="n">${g.days || ''}</td><td class="n"><b>${g.otM ? H(g.otM) : ''}</b></td><td class="n">${g.days ? H(g.otM / g.days) : ''}</td><td class="n">${g.maxDay ? H(g.maxDay) : ''}</td><td class="n">${g.otM ? fmtPct(pct(g.otM, g.schedM)) : ''}</td><td class="n">${g.knownM ? fmtPct(pct(g.logM, g.knownM)) : g.otM ? '<span class="meta">no logins</span>' : ''}</td><td class="n" style="color:${g.weeksOver ? 'var(--bad)' : 'inherit'}">${g.weeksOver || ''}</td><td class="num">${g.last ? fmtS(g.last) : ''}</td></tr>`).join('') || '<tr><td colspan="11"><div class="empty">No overtime and nobody over 48 h a week in this period.</div></td></tr>'}</tbody></table></div>
+    ${ags.length > 40 ? `<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:10px"><span class="meta">${pg * 40 + 1}–${Math.min(ags.length, pg * 40 + 40)} of ${ags.length}</span><button class="btn sm" data-a="otPg" data-v="-1" ${pg ? '' : 'disabled'}>←</button><button class="btn sm" data-a="otPg" data-v="1" ${(pg + 1) * 40 < ags.length ? '' : 'disabled'}>→</button></div>` : ''}</section>`;
+}
+function otAgent(id) {
+  const R = otRange(), a = W.AGI[id], g = W.otStats({ ...otFilter(R), keys:null, acc:a.acc, lob:a.key }).byAg.find(x => x.a.id === id) || { list:[], otM:0, days:0 };
+  open(`${esc(a.name)} · overtime`, `<p class="sub" style="margin-bottom:12px">${esc(lobName(a.key))} · TL ${esc(a.tl || '—')} · ${fmtD(R.from)} – ${fmtD(R.to)} · ${(g.otM / 60).toFixed(1)} OT h on ${g.days} shift${g.days === 1 ? '' : 's'}</p>
+    <table><thead><tr><th>Date</th><th>Shift</th><th>OT window</th><th class="n">OT h</th><th class="n">Logged in during OT</th></tr></thead><tbody>${g.list.slice().reverse().map(x => `<tr><td class="num">${fmtD(x.d)}</td><td class="num">${W.shiftLabel(x.s.code)}</td><td class="num">${x.iv.map(([p, q]) => hm(p) + '–' + hm(q)).join(', ')}</td><td class="n">${(x.om / 60).toFixed(1)}</td><td class="n">${x.known ? (x.w / 60).toFixed(1) + ' h · ' + fmtPct(pct(x.w, x.om)) : '<span class="meta">no logins</span>'}</td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">No overtime in this period.</div></td></tr>'}</tbody></table>`, `<button class="btn" data-a="close">Close</button>`);
+}
 function lineChart(series, target, lo, hi) {
   if(series.length>1)return `<div class="chart-facets">${series.map(s=>lineChart([s],target,lo,hi)).join('')}</div>`;
   const values = series.flatMap(s => s.pts.map(p => p[1])).filter(Number.isFinite);
@@ -3335,6 +3404,7 @@ const SPK = {
   audit:{get:() => UX.auditStations,set:v => {UX.auditStations=v; S.auPick.clear();}},
   absence:{get:() => UX.absStations,set:v => {UX.absStations=v; S.absLob='all';}},
   attendance:{get:() => UX.adhStations,set:v => {UX.adhStations=v; S.adhLob='all';}},
+  overtime:{get:() => UX.otStations,set:v => {UX.otStations=v; S.otPg=0;}},
   roster:{ get:() => S.rs.lobs, set:v => { S.rs.lobs = v; S.rs.page = 0; } }
 };
 const spkGroups = lobs => { const g = {}; lobs.forEach(l => { const k = (S.acc === 'all' ? W.ACC[l.acc].name + ' · ' : '') + (l.site || '—'); (g[k] = g[k] || []).push(l); }); Object.values(g).forEach(x => x.sort((a, b) => (a.station || a.lob).localeCompare(b.station || b.lob))); return g; };
@@ -5106,6 +5176,15 @@ const A = {
   tmDel: el => { const r = W.TEAM_MAP.find(x => x.id === el.dataset.v); if (!r) return;
     if (r.site === '*' && r.station === '*' && r.teamId && !confirm(`Remove the main Shifts team for ${W.ACC[r.acc] ? W.ACC[r.acc].name : r.acc}? People it covers won't get schedule changes in Shifts until another row covers them.`)) return;
     W.removeTeamMap(r.id); saveTeams(); toast('Team removed from the mapping'); render(); },
+  otG: el => { S.otPg = 0; S.otG = el.dataset.v; render(); },
+  otP: el => { S.otPg = 0; S.otP = +el.dataset.v; render(); },
+  otW: el => { S.otPg = 0; S.otW = +el.dataset.v; render(); },
+  otMo: el => { S.otPg = 0; S.otMo = +el.dataset.v; render(); },
+  otPg: el => { S.otPg = Math.max(0, (S.otPg || 0) + +el.dataset.v); render(); },
+  otAg: el => otAgent(el.dataset.v),
+  expOT: () => { const R = otRange(), O = W.otStats(otFilter(R)), h = m => (m / 60).toFixed(2);
+    W.ui.csv('overtime.csv', [['Date','Agent','ID','Account','LOB','Team lead','Shift','OT window','OT hours','Login data','Logged in during OT (h)','Scheduled paid hours that week over 48'],
+      ...O.byAg.flatMap(g => g.list.map(x => [x.d, g.a.name, g.a.id, W.ACC[g.a.acc].name, lobName(g.a.key), g.a.tl || '', W.shiftLabel(x.s.code), x.iv.map(([p, q]) => hm(p) + '-' + hm(q)).join(' '), h(x.om), x.known ? 'yes' : 'no', x.known ? h(x.w) : '', g.weeksOver ? 'yes' : '']))]); },
   adhP: el => { S.adhPg = 0; S.adhP = +el.dataset.v; render(); },
   adhG: el => { S.adhPg = 0; S.adhG = el.dataset.v; render(); },
   adhW: el => { S.adhPg = 0; S.adhW = +el.dataset.v; render(); },
