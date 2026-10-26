@@ -754,8 +754,9 @@ function runJob(j) {
   }
   j.team = t.team; j.teamId = t.teamId;
   j.status = 'Queued';
-  setTimeout(() => { j.status = 'Sending'; emit(); }, 600);
+  setTimeout(() => { if (!AGI[j.agent]) return; j.status = 'Sending'; emit(); }, 600);
   setTimeout(() => {
+    if (!AGI[j.agent]) return;    // sample job whose person was replaced by live data before the simulated reply came back
     const fail = !j.attempt && hashKey(j.id + j.agent) < .05;
     j.status = fail ? 'Failed' : 'Confirmed';
     j.msg = fail ? 'Shifts: user not found in team. Check the email mapping for this agent.' : `Microsoft Shifts accepted ${j.dates.length} item${j.dates.length === 1 ? '' : 's'}`;
@@ -2390,6 +2391,11 @@ function signin() {
     <p class="sub" style="font-size:14px;margin-top:8px">This copy of the Workforce Tool can't reach its database, so nobody can sign in.</p>
     <div class="note" style="margin-top:16px">Admin: put the Supabase <b>publishable</b> key in <span class="mono">config.js</span> next to this page (it starts with <span class="mono">sb_publishable_</span>; never the secret key), then reload.</div>
     <div class="si-pow">POWERED BY<b>Lean Solutions Group</b></div></div></section></div>`;
+  /* a saved session is signing in by itself: show progress, not an empty form that invites a second sign-in */
+  if (S.restoring && !(S.lgErr && !/…$/.test(S.lgErr))) return `<div class="signin">${siArt()}<section class="si-form"><div class="si-box"><h1>Signing you <span>in</span></h1>
+    <p class="sub" style="font-size:14px;margin-top:8px">Welcome back.</p>
+    <div class="note" style="margin-top:16px">${esc(S.lgErr || 'Checking your saved sign-in…')}</div>
+    <div class="si-pow">POWERED BY<b>Lean Solutions Group</b></div></div></section></div>`;
   if (S.signup) return `<div class="signin">${siArt()}<section class="si-form"><button class="iconbtn" data-a="theme" aria-label="Switch theme">◐</button>
     <div class="si-box"><h1>Create your <span>account</span></h1><p class="sub" style="font-size:14px">Use your work email. Your WFM admin gives you access after you sign up.</p>
       <div class="field" style="margin-top:20px"><label class="f" for="suN">Full name</label><input class="in" id="suN" autocomplete="name" placeholder="e.g. Paola Ruiz" value="${esc(S.suName || '')}"></div>
@@ -2512,6 +2518,19 @@ function shiftsPill() {
     : draft ? `<button class="pill warn" ${go}><i></i>${draft} unpublished</button>`
     : `<button class="pill ok" ${go}><i></i>Shifts in sync</button>`;
 }
+/* accounts whose people have not arrived from Teams yet: their numbers would read 0, so data pages say "loading" instead */
+const DATA_PAGES = ['overview','live','schedule','builder','shiftchk','schaudit','allocation','whatif','adherence','abs','ot','planvs','roster'];
+const waitingAccs = () => W.ACCOUNTS.filter(a => inScope(a.id) && (S.acc === 'all' || S.acc === a.id) && (DB.teams || {})[a.id]?.st === 'loading' && !W.AG.some(x => x.acc === a.id && x.cap));
+const shownAccs = () => W.ACCOUNTS.filter(a => inScope(a.id) && (S.acc === 'all' || S.acc === a.id) && ((DB.teams || {})[a.id] || W.AG.some(x => x.acc === a.id)));
+function loadingGate() {
+  if (!DATA_PAGES.includes(S.page)) return ''; const w = waitingAccs(), all = shownAccs();
+  if (!w.length || w.length < all.length) return '';
+  return `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Loading ${esc(w.map(a => a.name).join(', '))} from Teams Shifts…</h2><p class="sub">People, schedules and leave are on their way. This page fills in by itself when they arrive, usually within 2–5 minutes. Nothing is shown until then, so no number here can be mistaken for real data.</p></div><span class="pill info"><i></i>Loading</span></div></section>`;
+}
+function loadingNote() {
+  if (!DATA_PAGES.includes(S.page) || loadingGate()) return ''; const w = waitingAccs();
+  return w.length ? `<p class="note">${esc(w.map(a => a.name).join(', '))} still loading from Teams Shifts. ${w.length === 1 ? 'Its' : 'Their'} numbers are not included yet.</p>` : '';
+}
 function shell() {
   if (!canSee(S.page)) S.page = PAGES.find(p => canSee(p[0]))[0];
   const pend = W.REQ.filter(r => r.status === 'Pending' && accOk(W.AGI[r.agent])).length, swp = W.SWAPS.filter(x => x.status === 'Pending approval' && swOk(x)).length, inn = myInactive().filter(x => x.futureShifts > 0).length;
@@ -2529,7 +2548,7 @@ function shell() {
         <span class="sp"></span><span id="syncPill">${syncPill()}</span>
         <button class="btn sm" data-a="pageHelp">Help with this page</button><button class="btn sm ghost" data-a="theme" aria-label="Switch theme">◐</button>
         <span class="user" title="${esc(W.ME.name)} · ${esc(W.ME.role)}"><span class="av">${initials(W.ME.name)}</span><span class="un">${esc(W.ME.name.split(' ')[0] === W.ME.name ? W.ME.name : W.ME.name)}<small>${esc(W.ME.role)}</small></span></span><button class="btn sm ghost" data-a="logout" title="Sign out" aria-label="Sign out">Sign out</button></div>
-      <main id="main">${pageIntro()}${cacheNotice()}${['live','overview'].includes(S.page) ? timeZonePanel() : ''}${({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
+      <main id="main">${pageIntro()}${cacheNotice()}${loadingNote()}${['live','overview'].includes(S.page) ? timeZonePanel() : ''}${loadingGate() || ({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
     </div></div>`;
 }
 
@@ -2872,7 +2891,11 @@ function adhAgent(id) {
 /* ---------- ABSENTEEISM ---------- */
 /* ABS periods: weeks (Monday start) or calendar months. Teams history is read 84 days back, so an older month is marked partial. */
 /* shared report periods: grain day / week (Monday start) / month (calendar), count = how many back including the current one */
+/* report dates follow the selected account's own day (a computer in Manila is already on tomorrow while Crane is on today);
+   with All accounts the computer's date is used */
+function repToday() { try { return S.acc !== 'all' && W.ACC[S.acc] ? W.accountClock(S.acc).day : TODAY; } catch (e) { return TODAY; } }
 function periodRange(grain, count) {
+  const TODAY = repToday();   // the selected account's date, not this computer's
   const covFrom = addD(TODAY, -84), mStart = back => { const [y, m] = TODAY.split('-').map(Number); return new Date(Date.UTC(y, m - 1 - back, 1)).toISOString().slice(0, 10); };
   if (grain === 'month') { const per = []; for (let b = count - 1; b >= 0; b--) { const st = mStart(b), en = b ? addD(mStart(b - 1), -1) : TODAY; per.push({ s:st, e:en, label:new Date(st + 'T12:00:00Z').toLocaleDateString('en-US', { month:'short', year:'numeric', timeZone:'UTC' }) + (st < covFrom ? '*' : '') + (b ? '' : ' (MTD)') }); }
     return { from:per[0].s, to:TODAY, per, covFrom, partial:per[0].s < covFrom }; }
@@ -2882,6 +2905,7 @@ function periodRange(grain, count) {
   return { from, to, per:range(from, to).map(d => ({ s:d, e:d, label:fmtS(d) })), covFrom, partial:from < covFrom };
 }
 function absRange() {
+  const TODAY = repToday();
   const covFrom = addD(TODAY, -84), mStart = back => { const [y, m] = TODAY.split('-').map(Number); return new Date(Date.UTC(y, m - 1 - back, 1)).toISOString().slice(0, 10); };
   if (S.absG === 'month') { const per = []; for (let b = S.absMo - 1; b >= 0; b--) { const st = mStart(b), en = b ? addD(mStart(b - 1), -1) : TODAY; per.push({ s:st, e:en, label:new Date(st + 'T12:00:00Z').toLocaleDateString('en-US', { month:'short', year:'numeric', timeZone:'UTC' }) + (st < covFrom ? '*' : '') + (b ? '' : ' (MTD)') }); }
     return { from:per[0].s, per, covFrom, partial:per[0].s < covFrom }; }
@@ -2890,6 +2914,7 @@ function absRange() {
   return { from, per, covFrom, partial:from < covFrom };
 }
 function pAbs() {
+  const TODAY = repToday();   // the selected account's date
   const HN = histNotice(), AR = absRange(), from = AR.from, f = { from, to:TODAY, acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations) }, A = W.absStats(f);
   const tgt = S.acc === 'all' ? weightedAbsTarget(f) : W.ACC[S.acc].absTarget, T = A.T, abs = pct(T.pl + T.un, T.sched);
   const per = AR.per, lobs = Object.values(A.byLob), grain = S.absG === 'month' ? 'month' : 'week';
@@ -2959,7 +2984,7 @@ function otRange() { const g = S.otG || 'week'; return periodRange(g, g === 'mon
 const otFilter = R => ({ from:R.from, to:R.to, acc:S.acc, keys:reportKeys(UX.otStations) });
 function pOT() {
   const R = otRange(), grain = S.otG || 'week', O = W.otStats(otFilter(R)), T = O.T, H = m => (m / 60).toLocaleString(undefined, { maximumFractionDigits:1 });
-  const ahead = W.otStats({ ...otFilter(R), from:addD(TODAY, 1), to:addD(TODAY, 7) }).T, PT = R.per.map(pp => W.otStats({ ...otFilter(R), from:pp.s, to:pp.e }));
+  const ahead = W.otStats({ ...otFilter(R), from:addD(repToday(), 1), to:addD(repToday(), 7) }).T, PT = R.per.map(pp => W.otStats({ ...otFilter(R), from:pp.s, to:pp.e }));
   const lobs = Object.keys(O.byLob).filter(k => O.byLob[k].otM || PT.some(x => x.byLob[k] && x.byLob[k].otM)).sort(), maxCell = Math.max(1, ...PT.flatMap(x => Object.values(x.byLob).map(o => o.otM)));
   const shade = m => m ? `background:color-mix(in srgb,#ad73d0 ${Math.round(12 + 40 * m / maxCell)}%,transparent)` : '', cell = o => !o || !o.otM ? '<td class="n meta">—</td>' : `<td class="n" style="${shade(o.otM)}">${H(o.otM)}<div class="meta">${o.people.size} ppl · ${fmtPct(pct(o.otM, o.schedM))}</div></td>`;
   const worked = pct(T.logM, T.knownM), ags = O.byAg, pg = S.otPg || 0, tls = Object.values(O.byTL).filter(x => x.otM).sort((a, b) => b.otM - a.otM), dowMax = Math.max(1, ...O.byDow.map(x => x.otM));
@@ -2974,7 +2999,7 @@ function pOT() {
     <div><div class="l">People with OT</div><div class="v">${T.people.size}</div><div class="h">of ${T.scheduled.size} scheduled · ${fmtPct(pct(T.people.size, T.scheduled.size))}</div></div>
     <div><div class="l">OT worked</div><div class="v ${worked == null ? '' : worked >= 90 ? 'ok' : 'warn'}">${worked == null ? '—' : fmtPct(worked)}</div><div class="h">${T.knownM ? H(T.logM) + ' of ' + H(T.knownM) + ' h with login data' : 'No login data for OT days'}</div></div>
     <div><div class="l">Weeks over 48 h</div><div class="v ${T.weeksOver ? 'bad' : ''}">${T.weeksOver}</div><div class="h">person-weeks · see Agents</div></div>
-    <div><div class="l">OT booked next 7 days</div><div class="v">${H(ahead.otM)}</div><div class="h">${ahead.people.size} people · ${fmtD(addD(TODAY, 1))} – ${fmtD(addD(TODAY, 7))}</div></div></div>
+    <div><div class="l">OT booked next 7 days</div><div class="v">${H(ahead.otM)}</div><div class="h">${ahead.people.size} people · ${fmtD(addD(repToday(), 1))} – ${fmtD(addD(repToday(), 7))}</div></div></div>
   <section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>OT hours by ${grain} and line of business</h2><p class="sub">Each cell: OT hours, people with OT, and OT as a % of that station's scheduled paid hours. Darker = more hours.${R.partial ? ` * Teams history starts ${fmtD(R.covFrom)}, so the first ${grain} is partial.` : ''}</p></div></div>
     <div class="tw"><table><thead><tr><th>Account · LOB</th>${R.per.map(pp => `<th class="n">${esc(pp.label)}</th>`).join('')}<th class="n">Period</th></tr></thead><tbody>
     ${lobs.map(k => `<tr><td class="nm">${esc(lobName(k))}</td>${PT.map(x => cell(x.byLob[k])).join('')}<td class="n"><b>${H(O.byLob[k].otM)}</b><div class="meta">${O.byLob[k].people.size} ppl · ${fmtPct(pct(O.byLob[k].otM, O.byLob[k].schedM))}</div></td></tr>`).join('') || `<tr><td colspan="${R.per.length + 2}"><div class="empty">No overtime in this period.</div></td></tr>`}
@@ -3529,6 +3554,9 @@ function chkRows() { const P = S.chk, c = W.SCHK[P.acc]; if (!c) return []; cons
   return c.rows.filter(r => P.type === 'open' || (P.type in CHK_TYPES ? r.type === P.type : r.side === P.type)).filter(r => !q || r.a.name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(q) || r.station.toLowerCase().includes(q)); }
 function pShiftsChk() {
   const accs = Object.keys(W.SCHK).filter(inScope), pil = (CONN.pilot || {}).accounts || [];
+  /* follow the account chosen at the top; a choice made in this page's own list holds until the top choice changes */
+  if (S.acc !== 'all' && accs.includes(S.acc) && S.chk.top !== S.acc) { S.chk.acc = S.acc; S.chk.page = 0; }
+  S.chk.top = S.acc;
   if (!S.chk.acc || !accs.includes(S.chk.acc)) S.chk.acc = accs[0] || pil[0] || '';
   const P = S.chk, c = W.SCHK[P.acc], info = (DB.chk || {})[P.acc] || {}, can = ['Admin','RTA'].includes(W.ME.role);
   const head = `<div class="head"><div class="grow"><div class="kicker">Two-way check · Microsoft Shifts ↔ Workforce Tool · checks automatically while schedule pages are open</div><h1><b>Compare with Teams Shifts</b></h1><p class="sub">Compares every person-day in Shifts with the tool, today to 5 weeks ahead, in the account’s Teams time zone. When a day was changed in Shifts after the tool's version reached it, the tool takes the Shifts version automatically and logs it in Schedule changes. When the tool has an edit that Shifts hasn't confirmed, it waits here to be sent.</p></div>
@@ -4177,7 +4205,7 @@ async function dbFlush() {
   DB.q = DB.q.filter(x => !batch.includes(x)); if (DB.q.length) dbFlush(); else if (!DB.dayQ.length && !DB.chgQ.length) dbSaveOk(); else dbKeepOutbox();
 }
 window.addEventListener('beforeunload', e => { if (!dbPending() || S.leaving) return; dbKeepOutbox(); dbFlushAll(); e.preventDefault(); e.returnValue = ''; });
-setTimeout(async () => { const sb = dbClient(); if (!sb || S.auth || S.recovery) return; const { data } = await sb.auth.getSession(); if (data && data.session) dbAfterSignIn(); }, 50);
+setTimeout(async () => { const sb = dbClient(); if (!sb || S.auth || S.recovery) return; const { data } = await sb.auth.getSession(); if (data && data.session) { S.restoring = true; render(); try { await dbAfterSignIn(); } finally { S.restoring = false; render(); } } }, 50);
 const saveTeams = () => { CONN.teamMap = W.TEAM_MAP.map(r => ({ ...r })); saveConn(); };
 const saveConn = () => { try { const { dbTest, flowTest, inTest, flowUrl, pubUrl, readUrl, ...keep } = CONN; localStorage.setItem('wft.conn', JSON.stringify(keep)); } catch (e) {} }; // flow links stay out of browser storage: they come from the database at sign-in, so removing someone's role also removes their access
 const FLOW_ACTIONS = [
@@ -4226,6 +4254,15 @@ function backupPanel() {
         <tr><td>Daily job</td><td>${b.job ? 'On · 08:00 UTC' : '<b>Off</b> · run 011_auto_backup.sql again'}</td></tr>
         <tr><td>Kept</td><td>${b.days || 0} day${b.days === 1 ? '' : 's'} · ${b.tables || 0} tables · ${Number(b.rows || 0).toLocaleString()} rows in the last copy · ${b.mb ?? 0} MB</td></tr></tbody></table>`}</section>`;
 }
+/* live database status: the site connects by itself (config.js), so there is nothing to type or save here */
+function dbStatusPanel() {
+  const host = String(CONN.dbUrl || '').replace(/^https?:\/\//, '').replace(/\/.*$/, ''), n = dbPending();
+  return `<section class="panel"><div class="panel-h"><div class="grow"><h2>Database</h2><p class="sub">Workforce Tool Supabase project, tables <span class="mono">wft_*</span>. Connected automatically when you sign in; there is nothing to enter or save.</p></div><span class="pill ok"><i></i>Connected</span></div>
+    <table><tbody><tr><td>Project</td><td class="mono">${esc(host)}</td></tr>
+      <tr><td>Signed in as</td><td>${esc(W.ME.name)} · ${esc(W.ME.role)}</td></tr>
+      <tr><td>Saving</td><td>${n ? `<span class="pill ${DB.offline ? 'bad' : 'warn'}"><i></i>${n} change${n === 1 ? '' : 's'} waiting${DB.offline ? ' · offline' : ''}</span>` : '<span class="pill ok"><i></i>All changes saved</span>'}</td></tr></tbody></table>
+    <p class="foot-note">Changes are saved as you work. If the connection drops they wait on this computer and are sent when it is back. The daily backup is in Automatic backup below.</p></section>`;
+}
 function pConnect() {
   const C = CONN, ed = isAdmin(), dt = C.dbTest, ft = C.flowTest;
   return `<div class="head"><div class="grow"><div class="kicker">Where the data comes from and where it goes</div><h1><b>Connections</b></h1><p class="sub">Same set-up as your live PTO portal: one Supabase database plus Power Automate flows into and out of Microsoft Shifts and Teams. Values are saved in this browser; the database key is the public (anon) key, and access is protected by database rules, not by hiding it.</p></div></div>
@@ -4248,12 +4285,12 @@ function pConnect() {
       ${ft ? `<div class="note ${ft.ok ? '' : 'bad'}" style="margin-top:10px">${esc(ft.msg)} · ${esc(ft.at)}</div>` : ''}
       <p class="foot-note">Test sends <span class="mono">{"action":"test"}</span>, the same as the portal's Test flow button; nothing is created in Shifts. Actions the tool sends are listed below.</p></section></div>
   <div class="cols c2" style="margin-top:14px">
-    <section class="panel"><div class="panel-h"><div class="grow"><h2>Database</h2><p class="sub">${C.standalone ? 'Workforce Tool Supabase project, tables <span class="mono">wft_*</span>.' : 'Supabase project “Flock Time Study”, tables <span class="mono">crane_pto_*</span> today.'}</p></div>${dt ? `<span class="pill ${dt.ok ? 'ok' : 'bad'}"><i></i>${dt.ok ? 'Connected' : 'Failed'}</span>` : '<span class="pill muted">Not tested</span>'}</div>
+    ${DB.on ? dbStatusPanel() : `<section class="panel"><div class="panel-h"><div class="grow"><h2>Database</h2><p class="sub">${C.standalone ? 'Workforce Tool Supabase project, tables <span class="mono">wft_*</span>.' : 'Supabase project “Flock Time Study”, tables <span class="mono">crane_pto_*</span> today.'}</p></div>${dt ? `<span class="pill ${dt.ok ? 'ok' : 'bad'}"><i></i>${dt.ok ? 'Connected' : 'Failed'}</span>` : '<span class="pill muted">Not tested</span>'}</div>
       <div class="field"><label class="f" for="cDbU">Database URL</label><input class="in mono" id="cDbU" value="${esc(C.dbUrl)}" ${ed ? '' : 'disabled'}></div>
       <div class="field"><label class="f" for="cDbK">Database key (anon / public)</label><input class="in mono" id="cDbK" type="password" autocomplete="off" value="${esc(C.dbKey)}" placeholder="Paste the anon key" ${ed ? '' : 'disabled'}></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" data-a="cDbSave" ${ed ? '' : 'disabled'}>Save &amp; test connection</button><button class="btn" data-a="cDbClear" ${ed ? '' : 'disabled'}>Use sample data only</button></div>
       ${dt ? `<div class="note ${dt.ok ? '' : 'bad'}" style="margin-top:10px">${dt.ok ? `Read-only check at ${esc(dt.at)}:<br>${dt.rows.map(r => `<span class="mono">${esc(r[0])}</span>: ${r[1] == null ? '<span style="color:var(--bad)">not reachable</span>' : r[1].toLocaleString() + ' rows'}`).join(' · ')}${dt.sync ? `<br>Last Shifts sync: <b>${esc(dt.sync)}</b>` : ''}` : esc(dt.msg)}</div>` : ''}
-      <p class="foot-note">The test only <b>reads</b> row counts and the last sync status. The prototype screens keep using sample data until the tool is switched over to these tables.</p></section>
+      <p class="foot-note">The test only <b>reads</b> row counts and the last sync status. The prototype screens keep using sample data until the tool is switched over to these tables.</p></section>`}
     <section class="panel"><h2 style="margin-bottom:8px">How the two directions fit</h2><ol style="margin:0;padding-left:18px;line-height:1.75">
       <li><b>Receiving</b> runs on its own every hour: Shifts → flow → database → tool. Nothing to paste in the tool; the database key goes in the flow's HTTP step.</li>
       <li><b>Sending</b> happens when you approve or publish: tool → flow trigger URL → Shifts.</li>
