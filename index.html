@@ -1590,11 +1590,12 @@ function enrichFromRoster(accId) {
   if (AG.some(x => x.acc === accId && x.cap)) st.notInShifts.forEach(x => { if (have.has(nameKey(x.name))) return; const r = R.byName[nameKey(x.name)], id = rosterOnlyId(accId, r); if (AGI[id]) return; have.add(nameKey(x.name)); const a = { id, name: r.name, acc: accId, site: r.site, lob: 'tmp', key: accId + '|tmp', tl: r.tl || '—', email: r.email || '', sup: r.sup, division: r.division, station: rosterStation(r), position: r.position, hcStatus: r.hcStatus, rosterRow: r, live:LIVE.on, pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], lateP: 0, absP: 0, real: true, notInShifts: true }; AG.push(a); AGI[a.id] = a; });
   R.stats = st; regroup(accId); return st;
 }
-function importRoster(rows, accId, file, quiet) {    // rows: {name, email, status, hcStatus, site, division, station, subAccount, position, shift, tl, sup, ssup, mgr}
+function importRoster(rows, accId, file, opts) {   // opts: true = quiet reload, or { quiet, rosterOnly } (rosterOnly: keep the roster, add no people)
+  const o = typeof opts === 'object' && opts ? opts : { quiet: !!opts }, quiet = !!o.quiet;    // rows: {name, email, status, hcStatus, site, division, station, subAccount, position, shift, tl, sup, ssup, mgr}
   const R = ROSTERS[accId] = { rows, file, at: stamp(), byName: {} };
   rows.forEach(r => { R.byName[nameKey(r.name)] = r; });
   const captured = AG.some(a => a.acc === accId && a.cap);
-  if (!captured) {                       // no Shifts data yet: the roster becomes the people list (LOB = division) with no schedule
+  if (!captured && !o.rosterOnly) {      // no Shifts data yet: the roster becomes the people list (LOB = division) with no schedule; skipped when the account's people come from Teams
     dropAgents(accId); let n = 0;
     rows.filter(r => r.hcStatus === 'In HC').forEach(r => { const lid = lobIdFor(r.site, rosterStation(r)), id = rosterOnlyId(accId, r); if (AGI[id]) return; n++; const a = { id, rosterOnly: true, name: r.name, acc: accId, site: r.site, lob: lid, key: accId + '|' + lid, tl: r.tl || '—', email: r.email || '', pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], lateP: 0, absP: 0, real: true, live:LIVE.on, rosterRow:r, station:rosterStation(r), position:r.position, hcStatus:r.hcStatus, isNew: true }; AG.push(a); AGI[a.id] = a; });
   }
@@ -3797,7 +3798,7 @@ async function dbLoadLive(p) {
      which drifted every sign-in until almost nobody matched. */
   const rosterSaved=await DB.sb.from('wft_settings').select('key,value').like('key','roster:%').then(r=>r,e=>({error:e}));
   if(rosterSaved.error)DB.rosterError=rosterSaved.error.message;
-  else (rosterSaved.data||[]).forEach(x=>{const acc=x.key.slice(7),v=x.value||{};if(W.ACC[acc]&&Array.isArray(v.rows)&&v.rows.length)W.importRoster(v.rows,acc,v.file||'Saved master roster',true);});
+  else (rosterSaved.data||[]).forEach(x=>{const acc=x.key.slice(7),v=x.value||{};if(W.ACC[acc]&&Array.isArray(v.rows)&&v.rows.length)W.importRoster(v.rows,acc,v.file||'Saved master roster',{quiet:true,rosterOnly:!!(CONN.teams||{})[acc]});});
   if (['Admin','RTA','Team lead'].includes(p.role)) await dbSyncPeople();     // needed before days can be saved (people are the parent rows)
   dbProcessDrops(); dbFactsInfo();
   dbLoadTeams(p);
