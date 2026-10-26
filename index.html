@@ -1777,7 +1777,7 @@ function loadLiveTeam(accId, J, opt = {}) {
   });
   const first = (J.from ? local(J.from)[0] : days.sort()[0]) || TODAY, last = (J.to ? local(J.to)[0] : days.sort().pop()) || addD(TODAY, 21);
   Object.entries(stOf).forEach(([id, st]) => { const m = mem.get(id) || {}, lid = lobIdFor(site, st);
-    const a = { id, name: m.name || 'Shifts user ' + id.slice(0, 6), acc: accId, site, lob: lid, key: accId + '|' + lid, tl: '—', email: (m.mail || '').toLowerCase(), sup: '', station: st, position: m.job || '', hcStatus: 'In HC', inactive: false,
+    const a = { id, name: m.name || 'Shifts user ' + id.slice(0, 6), acc: accId, site, lob: lid, key: accId + '|' + lid, tl: '—', email: (m.mail || '').toLowerCase(), sup: '', station: st, shiftsGroup: st, position: m.job || '', hcStatus: 'In HC', inactive: false,
       pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], cap: { codes: { ...(codes[id] || {}) }, first, last, weekEnd: last, stop: true }, lateP: 0, absP: 0, real: true, live: true, fromShifts: true, notInShifts: false, rosterRow: null };
     AG.push(a); AGI[a.id] = a; range(first, last).forEach(d => ensurePlan(a, d, 'Captured from Shifts')); });
   Object.entries(imported).forEach(([id,byD])=>Object.entries(byD).forEach(([d,x])=>{const o=OV[kOf(id,d)]=OV[kOf(id,d)]||{};
@@ -2807,7 +2807,8 @@ function assignDrawer() {
 function pilDraft() { if (!S.pil) { const P = pilotCfg(); S.pil = { read:readAccs().slice(), accounts:P.accounts.slice(), mode:{ ...(P.mode || Object.fromEntries(P.accounts.map(x => [x, 'live']))) }, scope:JSON.parse(JSON.stringify(P.scope || {})) }; } return S.pil; }
 function pilotRow(id) {
   const D = pilDraft(), sc = D.scope[id] = D.scope[id] || { stations:[], people:[] }, mode = D.mode[id] || 'dry', acc = W.ACC[id];
-  const stations = [...new Set(W.AG.filter(a => a.acc === id && !a.inactive).map(stOf).filter(Boolean))].sort();
+  const live = W.AG.filter(a => a.acc === id && !a.inactive), groups = new Set(live.map(a => a.shiftsGroup).filter(Boolean)), found = new Set(live.flatMap(stNames));
+  const stations = [...new Set([...found, ...sc.stations])].sort(), stale = sc.stations.filter(x => !found.has(x));
   const ppl = W.AG.filter(a => a.acc === id && !a.inactive).sort((x, y) => x.name.localeCompare(y.name)), inScope = W.AG.filter(a => a.acc === id && !a.inactive && pilotGateDraft(a, D)).length;
   return `<div class="panel" style="margin:10px 0 0;padding:12px;background:var(--bg2,transparent)">
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><b>${esc(acc.name)}</b>
@@ -2815,12 +2816,12 @@ function pilotRow(id) {
       <span class="pill ${mode === 'live' ? 'ok' : 'info'}"><i></i>${mode === 'live' ? 'Writes real shifts' : 'Preview only · nothing written'}</span>
       <span class="meta">${inScope} of ${ppl.length} people in scope</span></div>
     <div class="meta" style="margin-bottom:4px">Stations <span>(none ticked = every station, unless people are picked)</span></div>
-    <div style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:8px">${stations.map(s => `<label style="display:inline-flex;gap:5px"><input type="checkbox" data-f="pilSt" data-k="${id}" value="${esc(s)}" ${sc.stations.includes(s) ? 'checked' : ''}> ${esc(s)}</label>`).join('') || '<span class="meta">No stations</span>'}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:8px">${stations.map(s => `<label style="display:inline-flex;gap:5px"><input type="checkbox" data-f="pilSt" data-k="${id}" value="${esc(s)}" ${sc.stations.includes(s) ? 'checked' : ''}> ${esc(s)}${groups.has(s) && !live.some(a => stOf(a) === s) ? ' <span class="meta">· Teams group</span>' : ''}${stale.includes(s) ? ' <span class="pill bad"><i></i>matches nobody</span>' : ''}</label>`).join('') || '<span class="meta">No stations</span>'}</div>
     <div class="meta" style="margin-bottom:4px">Named people <span>(added on top of the stations)</span></div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">${sc.people.map(pid => `<span class="pill muted">${esc((W.AGI[pid] || {}).name || pid)} <button class="btn sm ghost" style="padding:0 4px;min-height:0" data-a="pilDel" data-k="${id}" data-v="${pid}" aria-label="Remove">✕</button></span>`).join('')}
       <input class="in" list="pilL_${id}" data-f="pilAdd" data-k="${id}" placeholder="Add a person…" style="width:220px"><datalist id="pilL_${id}">${ppl.filter(a => !sc.people.includes(a.id)).map(a => `<option value="${esc(a.name)}">${esc(stOf(a))}</option>`).join('')}</datalist></div></div>`;
 }
-function pilotGateDraft(a, D) { const sc = D.scope[a.acc] || {}, st = sc.stations || [], pp = sc.people || []; return !(st.length || pp.length) || st.includes(stOf(a)) || pp.includes(a.id); }
+function pilotGateDraft(a, D) { const sc = D.scope[a.acc] || {}, st = sc.stations || [], pp = sc.people || []; return !(st.length || pp.length) || stNames(a).some(n => st.includes(n)) || pp.includes(a.id); }
 function arrivalDrawer(id, d) {
   const a = W.AGI[id], s = W.sched(a, d), x = W.arrivalOf(a, d) || {}, ses = W.logins(a, d), first = ses[0];
   const q = m => `<button class="btn sm" data-a="arrQuick" data-v="${m}">+${m} min</button>`;
@@ -3963,11 +3964,13 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 /* what "publishing" does in live mode: PTO decisions go to Shifts through the live flow; shift publishing is off at launch */
 /* publishing safety: who the tool may write to in Shifts. account ticked → optional stations / named people → Dry run (preview only) or Live */
 const stOf = a => a.station || (W.LOB[a.key] || {}).station || (W.LOB[a.key] || {}).lob || '';
+/* a person can be picked for publishing by their roster station or by their Teams Shifts group (the roster import renames stations) */
+const stNames = a => [...new Set([stOf(a), a.shiftsGroup].filter(Boolean))];
 function pilotCfg() { const P = CONN.pilot || (DEV ? { read:['ONT'], accounts:['ONT'], site:{ ONT:'Manila' } } : {});   /* local test mode mirrors the live set-up (OnTrac) */ return { accounts:P.accounts || [], site:P.site || { ONT:'Manila' }, mode:P.mode || null, scope:P.scope || {} }; }
 function pilotGate(a) {
   const P = pilotCfg(); if (!a || !P.accounts.includes(a.acc)) return { mode:null, why:`${a ? W.ACC[a.acc].name : 'This account'} isn't in the publishing controls` };
   const sc = P.scope[a.acc] || {}, st = sc.stations || [], pp = sc.people || [];
-  if ((st.length || pp.length) && !st.includes(stOf(a)) && !pp.includes(a.id)) return { mode:null, why:`${a.name} isn't in the pilot stations / people for ${W.ACC[a.acc].name}` };
+  if ((st.length || pp.length) && !stNames(a).some(n => st.includes(n)) && !pp.includes(a.id)) return { mode:null, why:`${a.name} isn't in the pilot stations / people for ${W.ACC[a.acc].name}` };
   return { mode:(P.mode ? P.mode[a.acc] : 'live') === 'live' ? 'live' : 'dry', why:'' };     // no mode saved yet = the pilot as it was (live); new accounts start as dry run
 }
 const gateLabel = g => g.mode === 'live' ? ['Will publish to Shifts', 'ok'] : g.mode === 'dry' ? ['Dry run · nothing written to Shifts', 'info'] : ['Saved in the tool only · not in the pilot', 'muted'];
