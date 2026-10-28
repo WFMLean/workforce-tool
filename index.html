@@ -3824,9 +3824,9 @@ async function dbLoadLive(p) {
   const [tp, rl] = await Promise.all([DB.sb.from('wft_shift_templates').select('start_min,end_min,created_by'), DB.sb.from('wft_settings').select('value').eq('key', 'rules').maybeSingle()]);
   W.applySavedTemplates(tp.data); if (rl.data) W.applyRules(rl.data.value);
   /* pilot: OnTrac read straight from Shifts (reader flow), Manila */
-  const st2 = await DB.sb.from('wft_settings').select('key,value').in('key', ['readUrl', 'pubUrl', 'pilot', 'acctz', 'opsPlanning']);
+  const st2 = await DB.sb.from('wft_settings').select('key,value,updated_at').in('key', ['readUrl', 'pubUrl', 'pilot', 'acctz', 'opsPlanning']);
   Object.assign(OPS,{budgets:[],pages:{},balances:[],reasons:[],allocations:{},clockSource:null});
-  (st2.data || []).forEach(x => { if(x.key === 'opsPlanning') applyOps(x.value); if (x.key === 'acctz') W.applyAccTz(x.value); if (x.key === 'readUrl') CONN.readUrl = x.value.url; if (x.key === 'pubUrl') CONN.pubUrl = x.value.url; if (x.key === 'pilot') CONN.pilot = x.value; });
+  (st2.data || []).forEach(x => { if(x.key === 'opsPlanning') applyOps(x.value); if (x.key === 'acctz') W.applyAccTz(x.value); if (x.key === 'readUrl') CONN.readUrl = x.value.url; if (x.key === 'pubUrl') CONN.pubUrl = x.value.url; if (x.key === 'pilot') { CONN.pilot = x.value; CONN.pilotAt = x.updated_at; } });
   await loadBalances();
   const ar = await DB.sb.from('wft_arrivals').select('*').gte('d', W.addD(TODAY, -2)); W.applySavedArrivals(ar.data);   // after every account's people exist
   DB.mute = false;
@@ -5230,11 +5230,16 @@ const A = {
   cPilotSave: async () => { if (!DB.on) return toast('Local test mode: nothing is saved'); const set = async (key, value) => { const { error } = await DB.sb.from('wft_settings').upsert({ key, value, updated_by:W.ME.name, updated_at:new Date().toISOString() }); if (error) throw error; };
     const ok = u => /^https:\/\/.+(powerplatform\.com|logic\.azure\.com)/i.test(u);
     try { const r = $('cRead').value.trim(), p = $('cPub').value.trim(), acc = [...document.querySelectorAll('.cPilot:checked')].map(x => x.value);
+      /* the form saves the whole setting: a page opened before someone else's change would quietly undo it (2026-10-29: an older tab removed Riverstone and NFI) */
+      const cur = await DB.sb.from('wft_settings').select('updated_at,updated_by').eq('key', 'pilot').maybeSingle(); if (cur.error) throw cur.error;
+      const tOf = t => t ? Date.parse(t) : 0;
+      if (tOf(cur.data && cur.data.updated_at) !== tOf(CONN.pilotAt)) return toast(`Publishing controls were changed${cur.data && cur.data.updated_by ? ' by ' + cur.data.updated_by : ''} after this page opened. Reload the page, then make your change again. Nothing was saved.`);
       if (r && !/^•/.test(r)) { if (!ok(r)) return toast('That reader link doesn\'t look like a Power Automate trigger link'); await set('readUrl', { url:r }); CONN.readUrl = r; }
       if (p && !/^•/.test(p)) { if (!ok(p)) return toast('That publish link doesn\'t look like a Power Automate trigger link'); await set('pubUrl', { url:p }); CONN.pubUrl = p; }
       const D = pilDraft(), P0 = pilotCfg(), mode = {}, scope = {};
       acc.forEach(x => { mode[x] = D.mode[x] || 'dry'; scope[x] = { stations:((D.scope[x] || {}).stations || []).slice(), people:((D.scope[x] || {}).people || []).slice() }; });
-      const prevRead = readAccs(), val = { read:D.read.filter(x => CONN.standalone || x !== 'CRN'), accounts:acc, site:P0.site, mode, scope }; await set('pilot', val); CONN.pilot = val; S.pil = null;
+      const prevRead = readAccs(), val = { read:D.read.filter(x => CONN.standalone || x !== 'CRN'), accounts:acc, site:P0.site, mode, scope }, at = new Date().toISOString();
+      { const { error } = await DB.sb.from('wft_settings').upsert({ key:'pilot', value:val, updated_by:W.ME.name, updated_at:at }); if (error) throw error; } CONN.pilot = val; CONN.pilotAt = at; S.pil = null;
       const newRead = val.read.filter(x => !prevRead.includes(x)); if (newRead.length) dbLoadTeams(W.ME);
       W.audit('Settings', 'Shifts pilot saved', 'Publishing controls', '', acc.map(x => `${x} ${mode[x]}${scope[x].stations.length || scope[x].people.length ? ` (${scope[x].stations.length} stations, ${scope[x].people.length} people)` : ''}`).join('; ') || 'none', 'Links stored in the database');
       toast('Pilot saved for everyone' + (newRead.length ? ` · loading ${newRead.map(x => W.ACC[x].name).join(', ')} from Shifts…` : '')); render();
