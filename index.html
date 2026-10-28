@@ -525,7 +525,7 @@ const ACCOUNTS = [
   // Caliber (Shifts team "WFM - Caliber") is left out for now, per JM 2026-10-06
 ];
 const ACC = Object.fromEntries(ACCOUNTS.map(a => [a.id, a]));
-const LOCNAME = { BAQ: 'Barranquilla', GUA: 'Guatemala', MNL: 'Manila', MDE: 'Medellín' }, LOCSHORT = { Barranquilla: 'BAQ', Guatemala: 'GUA', Manila: 'MNL', 'Medellín': 'MDE' };
+const LOCNAME = { BAQ: 'Barranquilla', BOG: 'Bogotá', GUA: 'Guatemala', MNL: 'Manila', MDE: 'Medellín' }, LOCSHORT = { Barranquilla: 'BAQ', 'Bogotá': 'BOG', Guatemala: 'GUA', Manila: 'MNL', 'Medellín': 'MDE' };
 const LOCF = { v: 'all' };                              // global location filter (LSG Branch)
 const LOBS = ACCOUNTS.flatMap(a => a.lobs.map(l => ({ acc: a.id, lob: l.id, key: a.id + '|' + l.id, hc: l.hc, minInt: l.minInt, name: `${a.name} · ${l.id}`, site: LOCNAME[a.site] || a.site, station: l.id })));
 const LOB = Object.fromEntries(LOBS.map(l => [l.key, l]));
@@ -1287,6 +1287,8 @@ const SHIFTS_TEAMS = [      // the Shifts teams JM's account belongs to (2026-10
   { team: 'LEAN - WFM (MNL)', acc: null, members: 9, groups: ['WFM Analysts', 'RTA'], site: 'MNL', internal: true },
   { team: 'OnTRAC', acc: 'ONT', members: 28, groups: ['Support', 'Claims'], site: 'BAQ' },
   { team: 'Riverstone Logistics - BPO', acc: null, members: 22, groups: ['Dispatch', 'Customer Care'], site: 'BAQ' },
+  { team: 'NFI INDUSTRIES - BAQ', acc: null, members: 0, groups: [], site: 'BAQ' },
+  { team: 'NFI INDUSTRIES - BOG', acc: null, members: 0, groups: [], site: 'BOG' },
   { team: 'WFM - Caliber', acc: null, members: 20, groups: ['Leave', 'Payroll'], site: 'GUA', excluded: true }
 ];
 /* ---------- Shifts team mapping: which Shifts team a person's shifts go to ----------
@@ -1427,7 +1429,8 @@ function restoreAccount(id) {
 }
 
 function addAccount(o) {             // o: {name, site, team?, lobs:[{id, hc, minInt}], absTarget, adhTarget, members?}
-  let id = o.name.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase(); while (ACC[id]) id = id.slice(0, 2) + String.fromCharCode(65 + Math.floor(Math.random() * 26));
+  let id = o.id || o.name.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase(); while (ACC[id])   // o.id: a fixed id for live accounts (it is the database key)
+    id = id.slice(0, 2) + String.fromCharCode(65 + Math.floor(Math.random() * 26));
   const acc = { id, name: o.name, site: o.site || 'BAQ', team: o.team || '—', teamId: o.teamId || '', absTarget: o.absTarget || 7, adhTarget: o.adhTarget || 95, lobs: o.lobs, manual: !o.team };
   ACCOUNTS.push(acc); ACC[id] = acc;
   o.lobs.forEach(l => { const key = id + '|' + l.id, x = { acc: id, lob: l.id, key, hc: l.hc, minInt: l.minInt || 2, name: `${acc.name} · ${l.id}`, site: LOCNAME[acc.site] || acc.site, station: l.id }; LOBS.push(x); LOB[key] = x; PAT_BY_LOB[key] = ['P2']; ALLOC[key] = { method: 'schedule', pct: 12, min: 1, hold: true }; });
@@ -1474,6 +1477,10 @@ addAccount({ name: 'Riverstone Logistics', team: 'Riverstone Logistics - BPO', t
     else if (r < a.absP + .035) setAbsence(a, d, pick(['Vacation', 'Paid PTO', 'Personal time-off']), '', 'Shifts time off', SYSTEM, tAt(addD(d, -10) < TODAY ? addD(d, -10) : TODAY, 600, 60, a.id + d), true);
   }));
 })();
+/* NFI Industries (JM, 2026-10-29): one Shifts team per site, so one account each. People, stations and shifts come from each Shifts team. */
+addAccount({ id: 'NBQ', name: 'NFI BAQ', team: 'NFI INDUSTRIES - BAQ', teamId: 'fe95b4b6-46ee-411f-b804-3b812d934adf', site: 'BAQ', lobs: [{ id: 'General', hc: 0, minInt: 1 }], absTarget: 7, adhTarget: 95 });
+addAccount({ id: 'NBG', name: 'NFI BOG', team: 'NFI INDUSTRIES - BOG', teamId: '1faf5661-1441-4814-be61-ab1493fd2b04', site: 'BOG', lobs: [{ id: 'General', hc: 0, minInt: 1 }], absTarget: 7, adhTarget: 95 });
+
 
 /* ---------- Shifts time-sheet import: captures an account's real schedule, clock-ins and time off ---------- */
 const TS_MAP = { 'Holiday': 'Holiday/VTO', 'Domestic Calamity': 'Serious domestic calamity', 'Legal Summons': 'Legal Summon', 'Mandatory Rest Days':'Mandatory Rest Day', 'Sick Day':'Medical leave', 'Sick':'Medical leave', 'Bereavement':'Bereavement leave', 'Paid Leave':'Paid PTO', 'Personal Time Off':'Personal time-off', 'School Obligations as Guardian':'School obligation as guardian', 'Early Leave':'Early Out' };
@@ -1717,7 +1724,7 @@ const tzOf = a => TZ[a && a.site] ?? TZ[LOCNAME[(ACC[(a || {}).acc] || {}).site]
 const TZ_CHOICES = [['America/Bogota', '(UTC−05:00) Bogotá, Lima, Quito, Rio Branco'], ['America/Guatemala', '(UTC−06:00) Central America (Guatemala)'], ['America/Mexico_City', '(UTC−06:00) Guadalajara, Mexico City'],
   ['America/Chicago', 'US Central (Chicago, Dallas) · DST'], ['America/New_York', 'US Eastern (New York) · DST'], ['America/Denver', 'US Mountain (Denver) · DST'], ['America/Phoenix', '(UTC−07:00) Arizona'],
   ['America/Los_Angeles', 'US Pacific (Los Angeles) · DST'], ['Asia/Manila', '(UTC+08:00) Manila'], ['UTC', '(UTC) Coordinated Universal Time']];
-const SITE_ZONE = { Barranquilla: 'America/Bogota', 'Medellín': 'America/Bogota', Guatemala: 'America/Guatemala', Manila: 'Asia/Manila' };
+const SITE_ZONE = { Barranquilla: 'America/Bogota', 'Bogotá': 'America/Bogota', 'Medellín': 'America/Bogota', Guatemala: 'America/Guatemala', Manila: 'Asia/Manila' };
 const ACCTZ = {};
 const zoneOf = accId => ACCTZ[accId] || (accId === 'ONT' ? 'Asia/Manila' : SITE_ZONE[LOCNAME[(ACC[accId] || {}).site]] || 'America/Bogota');
 const ZF = {};
@@ -2923,7 +2930,7 @@ function pAbs() {
   const avgUn = pct(T.un, T.sched), Hh = m => Math.round(m / 60).toLocaleString(), absM = T.plM + T.unM + T.ucM, absH = pct(absM, T.schedM), allowM = T.schedM * tgt / 100;
   const P = W.absPatterns({ acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations), min:S.patMin });
   const watch = A.byAg.filter(g => g.un).sort((a, b) => b.bradford - a.bradford || b.un - a.un).slice(0, 15);
-  const accLines = (S.acc === 'all' ? W.ACCOUNTS : [W.ACC[S.acc]]).map((acc, i) => ({ name:acc.name, color:['var(--acc)','#f5b84a','#b98cff'][i], pts:per.map(pp => { let s = 0, ab = 0; W.AG.filter(a => a.acc === acc.id && (S.absLob === 'all' || a.key === S.absLob) && reportKeys(UX.absStations).has(a.key)).forEach(a => range(pp.s, pp.e).forEach(d => { if (d > TODAY) return; const sc = W.sched(a, d); if (!sc.working) return; s++; if (sc.absence) ab++; })); return [pp.s, pct(ab, s)]; }) }));
+  const accLines = (S.acc === 'all' ? W.ACCOUNTS : [W.ACC[S.acc]]).map((acc, i) => ({ name:acc.name, color:['var(--acc)','#f5b84a','#b98cff','#4fd1a5','#ff8a80','#7aa7ff'][i % 6], pts:per.map(pp => { let s = 0, ab = 0; W.AG.filter(a => a.acc === acc.id && (S.absLob === 'all' || a.key === S.absLob) && reportKeys(UX.absStations).has(a.key)).forEach(a => range(pp.s, pp.e).forEach(d => { if (d > TODAY) return; const sc = W.sched(a, d); if (!sc.working) return; s++; if (sc.absence) ab++; })); return [pp.s, pct(ab, s)]; }) }));
   const shade = (v, t) => v == null ? '' : `background:color-mix(in srgb,${v > t * 1.25 ? 'var(--bad) 42%' : v > t ? 'var(--warn) 32%' : 'var(--ok) 22%'},transparent)`;
   /* late arrivals per period: days with a late first login ÷ scheduled days that have login data (adh() skips days with no upload) */
   const LF = { acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations) }, LT = per.map(pp => W.adhStats({ ...LF, from:pp.s, to:pp.e })), LA = W.adhStats({ ...LF, from, to:TODAY });
@@ -3278,7 +3285,7 @@ function pUsersDb() {
   <section class="panel" style="margin-bottom:14px"><h2 style="margin-bottom:8px">People with access</h2><div class="tw"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Accounts</th><th>Status</th><th>Last seen</th><th></th></tr></thead><tbody>
   ${U.profiles.map(p => `<tr><td class="nm">${esc(p.name)}</td><td class="meta">${esc(p.email)}</td><td>${p.role === 'Pending' ? '<span class="pill warn">Waiting for setup</span>' : esc(p.role)}</td><td>${esc(accN(p.scope))}</td>
     <td><span class="pill ${p.status === 'Active' ? 'ok' : 'muted'}"><i></i>${esc(p.status)}</span></td><td class="num">${p.last_seen ? esc(new Date(p.last_seen).toLocaleString()) : '—'}</td>
-    <td class="nowrap">${p.id !== DB.profile.id ? `<button class="btn sm" data-a="dbEditProfile" data-v="${p.id}">Edit</button> ${p.role==='Pending'?`<button class="btn sm" data-a="dbResetSetup" data-v="${esc(p.email)}">Reset setup password</button>`:''} <button class="btn sm ${p.status === 'Disabled' ? 'ok' : 'bad'}" data-a="dbToggleProfile" data-v="${p.id}">${p.status === 'Disabled' ? 'Enable' : 'Disable'}</button>` : '<span class="meta">You</span>'}</td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Nobody yet.</div></td></tr>'}</tbody></table></div></section>
+    <td class="nowrap">${p.id !== DB.profile.id ? `<button class="btn sm" data-a="dbEditProfile" data-v="${p.id}">Edit</button> ${p.role==='Pending'?`<button class="btn sm" data-a="dbResetSetup" data-v="${esc(p.email)}">Reset setup password</button>`:''}${p.role!=='Pending'&&p.status==='Active'?`<button class="btn sm" data-a="dbSendReset" data-v="${esc(p.email)}">Send reset email</button>`:''} <button class="btn sm ${p.status === 'Disabled' ? 'ok' : 'bad'}" data-a="dbToggleProfile" data-v="${p.id}">${p.status === 'Disabled' ? 'Enable' : 'Disable'}</button>` : '<span class="meta">You</span>'}</td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Nobody yet.</div></td></tr>'}</tbody></table></div></section>
   <section class="panel" style="margin-bottom:14px"><h2 style="margin-bottom:8px">Ready to create a login</h2><div class="tw"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Accounts</th><th>Added</th><th></th></tr></thead><tbody>
   ${U.invites.filter(i => !U.profiles.some(p => p.email === i.email.toLowerCase())).map(i => `<tr><td class="nm">${esc(i.name)}</td><td class="meta">${esc(i.email)}</td><td>${esc(i.role)}</td><td>${esc(accN(i.scope))}</td><td class="meta">${esc(new Date(i.created_at).toLocaleDateString())} · ${esc(i.created_by || '')}</td><td><button class="btn sm pri" data-a="dbCreateLogin" data-v="${esc(i.email)}">Create login</button> <button class="btn sm bad" data-a="dbDelInvite" data-v="${esc(i.email)}">Remove</button></td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">No one waiting.</div></td></tr>'}</tbody></table></div>
     <p class="foot-note">Create login shows a temporary password once. Share it privately with that person. Their first sign-in asks them to choose a password before their assigned access opens.</p><button class="btn sm" data-a="dbCheckUserSetup">Check login setup connection</button></section>`;
@@ -5031,6 +5038,18 @@ const A = {
   dbCreateLogin: async el => dbCreateLogin(el.dataset.v),
   dbUsersReload: async () => { await dbLoadUsers(); render(); },
   dbEditProfile: el => {const p=DB.users.profiles.find(p=>p.id===el.dataset.v),i=DB.users.invites.find(i=>i.email===p.email);dbUserDrawer(p.role==='Pending'&&i?{...p,role:i.role,scope:i.scope}:p);},
+  /* password reset email for an active person: the same link "Forgot password" sends, without them having to ask.
+     Supabase's built-in mailer allows only a few emails an hour, so the same address waits 2 minutes between sends. */
+  dbSendReset: el => { const em = el.dataset.v, p = (DB.users.profiles || []).find(x => x.email === em) || {};
+    open('Send password reset', `<p><b>${esc(p.name || em)}</b> · ${esc(em)}</p><p class="sub">They get an email with a link to choose a new password. The link opens this tool and works for 60 minutes. Their current password keeps working until they change it.</p><p class="note">The email comes from <b>noreply@mail.app.supabase.io</b>. Ask them to check Junk or quarantine if it doesn't arrive in a few minutes.</p>`,
+      `<button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="dbSendResetGo" data-v="${esc(em)}">Send reset email</button>`); },
+  dbSendResetGo: async el => { const em = el.dataset.v, last = (DB.resetSent || {})[em];
+    if (last && Date.now() - last < 120000) return toast(`A reset email was sent to ${em} less than 2 minutes ago. Wait before sending another.`);
+    const back = /^https?:/.test(location.protocol) ? location.origin + location.pathname : undefined;
+    const { error } = await dbClient().auth.resetPasswordForEmail(em, back ? { redirectTo:back } : undefined).then(r => r, e => ({ error:e }));
+    if (error) return toast(/rate|limit|too many|429/i.test(error.message + (error.status || '')) ? 'Supabase allows only a few reset emails per hour. Try again later.' : 'Reset email not sent: ' + error.message);
+    DB.resetSent = { ...(DB.resetSent || {}), [em]:Date.now() }; W.audit('Access', 'Password reset email sent', em, '', '', 'From Users & access · link valid 60 minutes');
+    close(); toast(`Reset email sent to ${em} · link valid 60 minutes`); },
   dbToggleProfile: async el => { const p = DB.users.profiles.find(x => x.id === el.dataset.v), st = p.status === 'Disabled' ? 'Active' : 'Disabled';
     const { error } = await DB.sb.from('wft_profiles').update({ status:st }).eq('id', p.id); if (error) return toast(error.message);
     W.audit('Access', st === 'Active' ? 'Account enabled' : 'Account disabled', p.email, p.status, st, ''); await dbLoadUsers(); toast(st === 'Active' ? 'Enabled' : 'Disabled'); render(); },
