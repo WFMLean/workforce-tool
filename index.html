@@ -4150,12 +4150,13 @@ async function dbReadTeam(accId, cached, opt = {}) {
      compared range so shifts that start late in the last day (account zone vs UTC) are not missed. */
   const partial = (!!opt.recent && !reuse) || !!opt.check, from = opt.history ? fullFrom : opt.check ? base - DAY : reuse || partial ? base - 14 * DAY : fullFrom, to = opt.history ? base - 13 * DAY : base + 36 * DAY, wins = [];
   for (let s = from; s < to; s += 7 * DAY) wins.push([s, Math.min(s + 8 * DAY, to)]);
-  const readWeek = async ([s, e], tries = 2) => {
-    try { return await readerCall({action:'readteam',teamId:W.ACC[accId].teamId,winFrom:iso(new Date(s)),winTo:iso(new Date(e))}); }
-    catch (err) { if (tries > 1) {await new Promise(resolve=>setTimeout(resolve,5000));return readWeek([s,e],tries-1);} throw new Error(`${err.message} (week of ${iso(new Date(s)).slice(0, 10)})`); }
+  /* names: the reader looks up people who are in Shifts but not team members (reader v6, ~5 s a call); only the first window's members are used */
+  const readWeek = async ([s, e], names, tries = 2) => {
+    try { return await readerCall({action:'readteam',teamId:W.ACC[accId].teamId,winFrom:iso(new Date(s)),winTo:iso(new Date(e)),names}); }
+    catch (err) { if (tries > 1) {await new Promise(resolve=>setTimeout(resolve,5000));return readWeek([s,e],names,tries-1);} throw new Error(`${err.message} (week of ${iso(new Date(s)).slice(0, 10)})`); }
   };
   const parts = [];
-  for (let i = 0; i < wins.length; i += 4) parts.push(...await Promise.all(wins.slice(i, i + 4).map(w => readWeek(w))));   // Queued globally: one connector call at a time across accounts
+  for (let i = 0; i < wins.length; i += 4) parts.push(...await Promise.all(wins.slice(i, i + 4).map((w, j) => readWeek(w, !opt.history && i + j === 0))));   // Queued globally: one connector call at a time across accounts
   parts.forEach((p, i) => { if ((p.shifts || []).length >= 5000 || (p.timeOff || []).length >= 5000) (()=>{throw Error(`${accId} reader: week ${i+1} reached the 5,000-item limit; refusing an incomplete snapshot`);})(); });
   const seen = new Set(), keep = k => !seen.has(k) && seen.add(k);
   if (opt.history) return { shifts:parts.flatMap(p => p.shifts || []), timeOff:parts.flatMap(p => p.timeOff || []) };
