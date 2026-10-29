@@ -4124,9 +4124,9 @@ async function packTeamCache(J){const s=JSON.stringify(J);if(s.length<1e6||typeo
  const b=new Uint8Array(await new Response(new Blob([s]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());let bin='';for(let i=0;i<b.length;i+=32768)bin+=String.fromCharCode.apply(null,b.subarray(i,i+32768));return {gz:btoa(bin)};}
 async function unpackTeamCache(P){if(!P||typeof P.gz!=='string')return P;const bin=atob(P.gz),b=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);
  return JSON.parse(await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream('gzip'))).text());}
-/* Team snapshots are OFF (2026-10-30). Restoring a full 17-week snapshot at sign-in froze the page for ~4 min (Crane: ~28,000 shifts and
-   ~16,000 time-off entries; the 2.3 s schedule load is not the slow part). The table wft_team_cache stays; turn this back on once that restore is fast. */
-const TEAM_CACHE_ON = false;
+/* Team snapshots (wft_team_cache): shown at sign-in, and within 24 h only the last 2 weeks + next 5 are read again (no history fill).
+   Switched off for a few minutes on 2026-10-30 after slow test loads that turned out to be Chrome slowing a background tab. */
+const TEAM_CACHE_ON = true;
 async function dbSaveTeamCache(acc,J){if(!TEAM_CACHE_ON||!DB.on||!['Admin','RTA'].includes(W.ME.role)||!J.complete||J.partial)return;const {error}=await DB.sb.from('wft_team_cache').upsert({account_id:acc,payload:await packTeamCache(J),version:1,captured_at:new Date().toISOString(),captured_by:DB.profile?.id});if(error)DB.cacheError=error.message;else DB.cacheSavedAt=new Date().toISOString();}
 async function dbReadAll(query,maxRows=Infinity){const rows=[];for(let offset=0;;offset+=1000){if(offset>=maxRows)return {data:rows,error:null,truncated:true};const r=await query().range(offset,offset+999);if(r.error)throw Error(r.error.message);rows.push(...(r.data||[]));if((r.data||[]).length<1000)return {data:rows,error:null};}}
 /* change history: read without failing the account. Too large (over 60,000 rows in 60 days) or too slow = schedules still load, history
@@ -4198,7 +4198,8 @@ function readerNext() {
   while (readerBusy < READER_LANES) {
     const job = readerWait[0].shift() || readerWait[1].shift(); if (!job) return;
     readerBusy++;
-    readerRun(job.body).then(job.resolve, job.reject).finally(() => setTimeout(() => { readerBusy--; readerNext(); }, 1000));
+    /* 1 s between calls per lane. In a background tab Chrome delays timers up to a minute, which stretched loads to 8+ min, so no pause there. */
+    readerRun(job.body).then(job.resolve, job.reject).finally(() => { const next = () => { readerBusy--; readerNext(); }; if (document.hidden) Promise.resolve().then(next); else setTimeout(next, 1000); });
   }
 }
 async function readerRun(body) {
