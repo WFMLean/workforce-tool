@@ -2763,8 +2763,9 @@ function scheduleDetail(id,d) {
 let scheduleReadBusy=false;
 async function refreshScheduleReads() {
  if(scheduleReadBusy||!DB.on||!S.auth||!CONN.readUrl)return;
+ if(Object.values(DB.teams||{}).some(x=>x.st==='loading'||x.hist==='loading'))return;   // the first load already reads these weeks; checking now only queues behind it
  scheduleReadBusy=true;
- try { for(const acc of W.LIVE.accs.filter(inScope)) await dbShiftsCheck(acc,null,true); }
+ try { for(const acc of W.LIVE.accs.filter(inScope)) await dbShiftsCheck(acc,null,true,true); }
  finally { scheduleReadBusy=false; }
 }
 setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))(S.page === 'requests' ? refreshTeamRequests() : refreshScheduleReads());},60000);
@@ -4130,14 +4131,25 @@ async function dbSaveReaderOriginals(acc,changes) {
 /* The reader flow returns at most 5,000 shifts and 5,000 time-off entries per call, and Power Automate drops calls after ~2 minutes,
    so a big team (Crane) is read one week at a time and merged. Shifts only lists items fully inside the window, so each week
    overlaps the next by a day (catches overnight shifts) and duplicates are dropped by id. */
-let readerQueue = Promise.resolve();
-function readerCall(body) {
-  const run = async () => { const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),90000);
-    try {const r=await fetch(CONN.readUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});if(!r.ok)throw Error('reader returned '+r.status);return await r.json();}
-    catch(e){if(e.name==='AbortError')throw Error('Shifts reader exceeded 90 seconds');throw e;}
-    finally{clearTimeout(timer);}
-  };
-  const result=readerQueue.then(run);readerQueue=result.catch(()=>{}).then(()=>new Promise(resolve=>setTimeout(resolve,1000)));return result;
+/* Two reader calls at a time (one at a time made a 5-account load ~8 min: a Crane week takes ~26 s, other teams ~3 s), 1 s apart per lane.
+   background = history fill and the 60 s Teams check: they wait until no first-load or manual read is waiting. */
+const READER_LANES = 2, readerWait = [[], []];
+let readerBusy = 0;
+function readerCall(body, background = false) {
+  return new Promise((resolve, reject) => { readerWait[background ? 1 : 0].push({body, resolve, reject}); readerNext(); });
+}
+function readerNext() {
+  while (readerBusy < READER_LANES) {
+    const job = readerWait[0].shift() || readerWait[1].shift(); if (!job) return;
+    readerBusy++;
+    readerRun(job.body).then(job.resolve, job.reject).finally(() => setTimeout(() => { readerBusy--; readerNext(); }, 1000));
+  }
+}
+async function readerRun(body) {
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),90000);
+  try {const r=await fetch(CONN.readUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});if(!r.ok)throw Error('reader returned '+r.status);return await r.json();}
+  catch(e){if(e.name==='AbortError')throw Error('Shifts reader exceeded 90 seconds');throw e;}
+  finally{clearTimeout(timer);}
 }
 /* cached = a complete snapshot from wft_team_cache. When it is under 24 h old and covers the 12-week history, only the last 2 weeks
    and the next 5 are read again (7 calls instead of 17); older history comes from the snapshot. A full read still runs once a day. */
@@ -4151,8 +4163,9 @@ async function dbReadTeam(accId, cached, opt = {}) {
   const partial = (!!opt.recent && !reuse) || !!opt.check, from = opt.history ? fullFrom : opt.check ? base - DAY : reuse || partial ? base - 14 * DAY : fullFrom, to = opt.history ? base - 13 * DAY : base + 36 * DAY, wins = [];
   for (let s = from; s < to; s += 7 * DAY) wins.push([s, Math.min(s + 8 * DAY, to)]);
   /* names: the reader looks up people who are in Shifts but not team members (reader v6, ~5 s a call); only the first window's members are used */
+  const bg = !!opt.history || !!opt.bg;   // background reads wait behind first loads and manual checks
   const readWeek = async ([s, e], names, tries = 2) => {
-    try { return await readerCall({action:'readteam',teamId:W.ACC[accId].teamId,winFrom:iso(new Date(s)),winTo:iso(new Date(e)),names}); }
+    try { return await readerCall({action:'readteam',teamId:W.ACC[accId].teamId,winFrom:iso(new Date(s)),winTo:iso(new Date(e)),names},bg); }
     catch (err) { if (tries > 1) {await new Promise(resolve=>setTimeout(resolve,5000));return readWeek([s,e],names,tries-1);} throw new Error(`${err.message} (week of ${iso(new Date(s)).slice(0, 10)})`); }
   };
   const parts = [];
@@ -4161,14 +4174,14 @@ async function dbReadTeam(accId, cached, opt = {}) {
   const seen = new Set(), keep = k => !seen.has(k) && seen.add(k);
   if (opt.history) return { shifts:parts.flatMap(p => p.shifts || []), timeOff:parts.flatMap(p => p.timeOff || []) };
   let requestData = {}, requestError = '';
-  try { requestData = await dbReadRequests(accId); } catch(e) { requestError = e.message; }
+  try { requestData = await dbReadRequests(accId, bg); } catch(e) { requestError = e.message; }
   const old = list => reuse ? (list || []).filter(x => { const t = Date.parse(x.start); return t >= fullFrom && t < from; }) : [];   // history the fresh read did not cover
   return { ...parts[0], complete:!requestError && Array.isArray(requestData.requests), ...(Array.isArray(requestData.requests) ? {requests:requestData.requests} : {}), requestError, partial, from:iso(new Date(partial ? from : fullFrom)), to:iso(new Date(to)), reusedHistory:reuse, fullAt:reuse ? (cp.fullAt || cached.captured_at) : new Date().toISOString(),
     shifts:[...parts.flatMap(p => p.shifts || []), ...old(cp && cp.shifts)].filter(x => keep('s' + (x.id || x.userId + x.start + x.end))),
     timeOff:[...parts.flatMap(p => p.timeOff || []), ...old(cp && cp.timeOff)].filter(x => keep('t' + x.userId + x.start + x.end + x.reasonId)) };
 }
-async function dbReadRequests(accId) {
-  const data = await readerCall({action:'readrequests',teamId:W.ACC[accId].teamId});   // same queue and 90 s limit as the shift reads
+async function dbReadRequests(accId, bg = false) {
+  const data = await readerCall({action:'readrequests',teamId:W.ACC[accId].teamId}, bg);   // same queue and 90 s limit as the shift reads
   if (!data || typeof data !== 'object') throw new Error('Request reader returned no data');
   if (!Array.isArray(data.requests)) throw new Error('The reader needs the v4 Teams requests update');
   if (data.requests.length >= 5000) throw new Error('Teams requests reached the 5,000-item read limit; check the flow pagination');
@@ -4182,9 +4195,9 @@ async function refreshTeamRequests() {
     catch(e){DB.requests[acc]={...(DB.requests[acc]||{}),err:e.message,at:new Date().toLocaleTimeString()};}
   }} finally {scheduleReadBusy=false;render();}
 }
-async function dbShiftsCheck(accId, J, auto = true) {
+async function dbShiftsCheck(accId, J, auto = true, bg = false) {
   const site = ((CONN.pilot || {}).site || {})[accId] || W.LOCNAME[W.ACC[accId].site] || 'Barranquilla';
-  try { J = J || await dbReadTeam(accId, null, { check:true }); } catch (e) { DB.chk = DB.chk || {}; DB.chk[accId] = { err:e.message, at:new Date().toLocaleTimeString() }; return render(); }
+  try { J = J || await dbReadTeam(accId, null, { check:true, bg }); } catch (e) { DB.chk = DB.chk || {}; DB.chk[accId] = { err:e.message, at:new Date().toLocaleTimeString() }; return render(); }
   await dbSaveTeamCache(accId,J);
   DB.requests = DB.requests || {};
   DB.requestReasons=DB.requestReasons||{}; DB.requestReasons[accId]=J.reasons || [];
