@@ -4224,9 +4224,10 @@ async function dbReadTeam(accId, cached, opt = {}) {
   for (let s = from; s < to; s += 7 * DAY) wins.push([s, Math.min(s + 8 * DAY, to)]);
   /* names: the reader looks up people who are in Shifts but not team members (reader v6, ~5 s a call); only the first window's members are used */
   const bg = !!opt.history || !!opt.bg;   // background reads wait behind first loads and manual checks
-  const readWeek = async ([s, e], names, tries = 2) => {
+  /* 3 tries (5 s, then 30 s apart): a Crane week now and then runs past 90 s and one slow week used to fail the whole account (2026-10-30) */
+  const readWeek = async ([s, e], names, tries = 3) => {
     try { return await readerCall({action:'readteam',teamId:W.ACC[accId].teamId,winFrom:iso(new Date(s)),winTo:iso(new Date(e)),names},bg); }
-    catch (err) { if (tries > 1) {await new Promise(resolve=>setTimeout(resolve,5000));return readWeek([s,e],names,tries-1);} throw new Error(`${err.message} (week of ${iso(new Date(s)).slice(0, 10)})`); }
+    catch (err) { if (tries > 1) {await new Promise(resolve=>setTimeout(resolve,tries === 3 ? 5000 : 30000));return readWeek([s,e],names,tries-1);} throw new Error(`${err.message} (week of ${iso(new Date(s)).slice(0, 10)}, 3 tries)`); }
   };
   const parts = [];
   for (let i = 0; i < wins.length; i += 4) parts.push(...await Promise.all(wins.slice(i, i + 4).map((w, j) => readWeek(w, !opt.history && i + j === 0))));   // Queued globally: one connector call at a time across accounts
