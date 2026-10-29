@@ -4533,6 +4533,9 @@ const bKey = (id, d) => id + '|' + d;
 const bCode = (a, d) => B.draft[bKey(a.id, d)] ?? W.sched(a, d).code;
 const bReason=(a,d)=>B.tags[bKey(a.id,d)] ?? (W.sched(a,d).rest || W.sched(a,d).absence?.reason || '');
 const bLocked = (a,d)=>{const k=bKey(a.id,d),r=bReason(a,d);return B.tags[k]!==undefined ? !!r&&r!=='OFF'&&!W.RCFG[r]?.rest : W.fullOff(W.sched(a,d));};
+/* Copy previous week "as is" (2026-10-30): a leave day copies the person's usual shift for that weekday (the same weekday in up to
+   6 earlier weeks without leave), not the hours the leave was plotted at. null = no usual shift on record: the day is left as it is. */
+const bCopySource = (a, d) => { if (!bLocked(a, d)) return bCode(a, d); for (let w = 1; w <= 6; w++) { const p = addD(d, -7 * w); if (!bLocked(a, p)) return bCode(a, p); } return null; };
 const bTemplates = () => Object.keys(W.SHIFTS).filter(k => k !== 'OFF').sort((x, y) => !!W.SHIFTS[y].saved - !!W.SHIFTS[x].saved || (W.SHIFTS[x].s % 1440) - (W.SHIFTS[y].s % 1440) || W.SHIFTS[x].e - W.SHIFTS[y].e);   // saved times first
 const bHrs = c => c === 'OFF' ? 0 : (W.SHIFTS[c].e - W.SHIFTS[c].s) / 60;
 function bChecks(a, ds) {
@@ -5040,7 +5043,9 @@ const A = {
     plan.forEach(x => W.queueSync(x.a, `Send week to Teams (${x.dates.length} day${x.dates.length > 1 ? 's' : ''})`, x.dates, 'schedule/shifts (batch)'));
     W.audit('Schedule', 'Week sent to Teams', plan.length + ' people', '', plan.reduce((t, x) => t + x.dates.length, 0) + ' days', 'Edit schedules · whole week', W.ME.name);
     toast('Sending ' + plan.length + ' ' + (plan.length > 1 ? 'people' : 'person') + ' to Teams · progress shows on each person'); render(); },
-  bCopyWeek: () => { const b = [], ids = B.sel.size ? [...B.sel] : bAgents().map(a => a.id); ids.forEach(id => { const a = W.AGI[id]; bDays().forEach(d => bSet(b, id, d, bCode(a, addD(d, -B.len)))); }); bCommit(b); toast(`Copied the previous ${B.len === 7 ? 'week' : '2 weeks'} · ${b.length} cells changed`); render(); },
+  bCopyWeek: () => { const b = [], ids = B.sel.size ? [...B.sel] : bAgents().map(a => a.id), n = { leave:0, none:0 }, pl = x => x === 1 ? '' : 's';
+    ids.forEach(id => { const a = W.AGI[id]; bDays().forEach(d => { const src = addD(d, -B.len), c = bCopySource(a, src); if (bLocked(a, src)) n[c == null ? 'none' : 'leave']++; if (c != null) bSet(b, id, d, c); }); });
+    bCommit(b); toast(`Copied the previous ${B.len === 7 ? 'week' : '2 weeks'} · ${b.length} cells changed${n.leave ? ` · ${n.leave} leave day${pl(n.leave)} copied as the usual shift` : ''}${n.none ? ` · ${n.none} leave day${pl(n.none)} left as is (no usual shift on record)` : ''}`); render(); },
   bApplyPat: () => { const P = W.PATTERNS[$('bPat').value], b = []; B.sel.forEach(id => bDays().forEach((d, i) => bSet(b, id, d, P.w.length === 7 ? P.w[dow(d)] : P.w[((Math.floor(W.diffD(B.from, d) / 7)) % 2) * 7 + dow(d)]))); bCommit(b); toast(`${P.name} applied to ${B.sel.size} · ${b.length} cells`); render(); },
   bSwap: () => { const prev = B.sw || {}; B.sw = { mode:B.sel.size === 2 ? 'people' : 'weeks', w:prev.w || { 0:true, 7:false }, first:prev.first ?? 0, dows:prev.dows || new Set([0, 1, 2, 3, 4, 5, 6]) };
     open('Swap schedules', bSwapBody(), `<button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="bSwapGo">Add swap to draft</button>`); },
