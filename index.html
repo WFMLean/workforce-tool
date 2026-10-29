@@ -4181,7 +4181,10 @@ async function dbLoadTeams(p) {
 }
 async function dbSaveReaderOriginals(acc,changes) {
  const saved=new Set(changes.filter(x=>x.kind==='Original schedule captured').map(x=>W.kOf(x.person_id,x.d))), rows=[];
- W.AG.filter(a=>a.acc===acc&&a.live).forEach(a=>Object.keys(W.PLAN).filter(k=>k.startsWith(a.id+'|')&&!saved.has(k)).forEach(k=>{const ref=W.PLAN[k],sh=W.SHIFTS[ref.code];rows.push({person_id:a.id,account_id:acc,d:k.split('|')[1],kind:'Original schedule captured',before:'',after:JSON.stringify({off:ref.code==='OFF',s:sh.s,e:sh.e}),source:'Teams original capture',by_name:W.ME.name,by_role:W.ME.role,reason:'First saved reference',remark:''});}));
+ /* only the days a fresh read covers (last 2 weeks + next 5). A snapshot load holds 12 weeks of history; days over 60 back are never in
+    `saved` (changes are read for 60 days), so capturing them wrote ~32,000 duplicate rows on every load (2026-10-30). */
+ const from=W.addD(TODAY,-14);
+ W.AG.filter(a=>a.acc===acc&&a.live).forEach(a=>Object.keys(W.PLAN).filter(k=>k.startsWith(a.id+'|')&&k.split('|')[1]>=from&&!saved.has(k)).forEach(k=>{const ref=W.PLAN[k],sh=W.SHIFTS[ref.code];rows.push({person_id:a.id,account_id:acc,d:k.split('|')[1],kind:'Original schedule captured',before:'',after:JSON.stringify({off:ref.code==='OFF',s:sh.s,e:sh.e}),source:'Teams original capture',by_name:W.ME.name,by_role:W.ME.role,reason:'First saved reference',remark:''});}));
  for(let i=0;i<rows.length;i+=500){const {error}=await DB.sb.from('wft_changes').insert(rows.slice(i,i+500));if(error){DB.err=error.message;toast('Original schedule could not be saved: '+error.message);break;}}
 }
 /* The reader flow returns at most 5,000 shifts and 5,000 time-off entries per call, and Power Automate drops calls after ~2 minutes,
