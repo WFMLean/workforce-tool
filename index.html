@@ -3098,7 +3098,7 @@ function pSettings() {
   <section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Publishing to Microsoft Shifts</h2><p class="sub">Each schedule change and PTO decision creates a job. Failed jobs can be retried.</p></div>${W.SYNC.some(j => j.status === 'Draft') ? '<button class="btn pri sm" data-a="publish">Publish drafts</button>' : ''}</div>
     <div class="tw"><table><thead><tr><th>Job</th><th>When</th><th>Agent</th><th>Action</th><th>Dates</th><th>Shifts team · endpoint</th><th>Status</th><th></th></tr></thead><tbody>
     ${W.SYNC.slice(0, 40).map(j => `<tr><td class="num">${j.id}</td><td class="num">${esc(j.at.slice(5))}</td><td>${esc(W.AGI[j.agent].name)}</td><td>${esc(j.action)}${j.notes ? `<div class="meta" title="Note sent to Shifts">Note: ${esc(j.notes)}</div>` : ''}</td><td class="meta">${j.dates.length > 3 ? fmtS(j.dates[0]) + ' + ' + (j.dates.length - 1) : j.dates.map(fmtS).join(', ')}</td><td class="meta"><div style="color:var(--ink2)">${esc(j.team || '—')}</div><span style="font-family:ui-monospace,monospace">${esc(j.endpoint)}</span></td>
-      <td><span class="pill ${({Confirmed:'ok', Failed:'bad', Draft:'warn', Retrying:'warn', 'Preview only':'info'})[j.status] || 'info'}"><i></i>${esc(j.status)}</span>${['Failed','Retrying','Confirmed','Preview only','Not sent'].includes(j.status) && j.msg ? `<div class="meta">${esc(j.msg)}</div>` : ''}</td><td>${j.status === 'Failed' ? `<button class="btn sm" data-a="retry" data-v="${j.id}">Retry</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">No jobs yet.</div></td></tr>'}</tbody></table></div></section>`;
+      <td><span class="pill ${({Confirmed:'ok', Failed:'bad', Draft:'warn', Retrying:'warn', 'Preview only':'info'})[j.status] || 'info'}"><i></i>${esc(j.status)}</span>${['Failed','Retrying','Confirmed','Preview only','Not sent'].includes(j.status) && j.msg ? `<div class="meta">${esc(j.msg)}</div>` : ''}</td><td>${j.status === 'Failed' || (j.status === 'Not sent' && /^schedule\/timesOff/.test(j.endpoint)) ? `<button class="btn sm" data-a="retry" data-v="${j.id}">${j.status === 'Failed' ? 'Retry' : 'Send'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">No jobs yet.</div></td></tr>'}</tbody></table></div></section>`;
 }
 
 /* ---------- OVERVIEW (corporate) ---------- */
@@ -4005,7 +4005,14 @@ W.setSender(async j => {
     DB.pubChain = (DB.pubChain || Promise.resolve()).then(() => g.mode === 'dry' ? dbDryRunJob(j, a) : dbPublishJob(j, a)).catch(e => {j.status='Failed';j.msg=e.message;console.warn(e);render();});   // strictly one at a time
     return;
   }
-  if (/^schedule\/shifts/.test(j.endpoint) && a && (pil.accounts || []).includes(a.acc) && !g.mode) { j.status = 'Not sent'; j.msg = g.why + '. The change is saved in the tool.'; return; }
+  if (/^schedule\/timesOff/.test(j.endpoint) && a && g.mode && CONN.flowUrl) {
+    if (g.mode === 'dry') { j.status = 'Not sent'; j.msg = `Dry run for ${W.ACC[a.acc].name}: time off is not written to Shifts. The absence is saved in the tool.`; return render(); }
+    j.status = 'Queued'; j.msg = 'Waiting its turn: Shifts changes go one request at a time.'; render();
+    DB.pubChain = (DB.pubChain || Promise.resolve()).then(() => dbTimeOffJob(j, a)).catch(e => {j.status='Failed';j.msg=e.message;console.warn(e);render();});
+    return;
+  }
+  if (/^schedule\/(shifts|timesOff)/.test(j.endpoint) && a && (pil.accounts || []).includes(a.acc) && !g.mode) { j.status = 'Not sent'; j.msg = g.why + '. The change is saved in the tool.'; return; }
+  if (/^schedule\/timesOff/.test(j.endpoint)) { j.status = 'Not sent'; j.msg = 'Saved in the tool. Add the "Crane PTO to Shifts" flow link in Connections to send time off to Shifts.'; return; }
   j.status = 'Not sent'; j.msg = (pil.accounts || []).length ? `Publishing is on only for the pilot (${pil.accounts.map(x => W.ACC[x] ? W.ACC[x].name : x).join(', ')}). This change is saved in the tool.` : 'Publishing shifts to Microsoft Shifts is off at launch. The change is saved in the tool with its reason.';
 });
 /* publishing with auto-retry. Each Shifts step inside the flow already retries (Power Automate default: 4 tries on 408/429/5xx), but that can
@@ -4040,6 +4047,45 @@ async function dbDryRunJob(j, a) {            // preview only: what Shifts holds
   }
   if (j.status !== 'Failed') j.status = 'Preview only'; j.msg = 'Dry run (nothing written) · ' + out.join(' · ');
   W.audit('Shifts sync', 'Preview only', a.name, j.dates.join(', '), j.status, j.msg); render();
+}
+/* Logged absence → time off in Shifts through the "Crane PTO to Shifts" flow (action create, the same request the PTO portal sends).
+   Time off only: the shift stays (JM, 2026-10-30). The person's days are read from Shifts first, so time off already there (entered in Teams,
+   or a retry after the flow finished late) is not created twice. The time off covers the whole day and the shift's overnight end. */
+const timeOffReason = (acc, rs) => ((DB.requestReasons || {})[acc] || []).map(r => r.name).find(n => n.trim().toLowerCase() === String(rs).trim().toLowerCase()) || '';
+async function dbTimeOffJob(j, a) {
+  const t = W.teamFor(a), teamId = (t && t.teamId) || W.ACC[a.acc].teamId, iso = ms => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
+  const done = (status, msg) => { j.status = status; j.msg = msg; W.audit('Shifts sync', status === 'Confirmed' ? 'Time off sent to Shifts' : 'Time off not sent', `${j.id} · ${a.name}`, j.dates.join(', '), status, msg); render(); };
+  if (!a.email) return done('Failed', 'No work email for this person, so Shifts can\'t find them.');
+  const days = j.dates.map(d => ({ d, s:W.sched(a, d) })).filter(x => x.s.absence);
+  if (!days.length) return done('Saved', 'The absence was removed before sending. Nothing to send.');
+  const part = days.find(x => !W.fullOff(x.s)); if (part) return done('Not sent', `Part-day absences (${part.s.absence.reason}) aren't sent to Shifts yet. The absence is saved in the tool.`);
+  const rs = days[0].s.absence.reason, reason = timeOffReason(a.acc, rs);
+  if (!((DB.requestReasons || {})[a.acc] || []).length) return done('Failed', 'The Teams time-off reasons haven\'t loaded yet. Retry once the schedules finish loading.');
+  if (!reason) return done('Failed', `${W.ACC[a.acc].name}'s Shifts team has no time-off reason named "${rs}". Add it in Teams → Shifts → Settings, then retry.`);
+  const items = days.map(({ d, s }) => ({ date:d, startUtc:iso(W.toUtcMs(a.acc, d, s.working ? Math.min(0, s.s) : 0)), endUtc:iso(W.toUtcMs(a.acc, d, s.working ? Math.max(1440, s.e) : 1440)), timeZone:W.zoneOf(a.acc) }));
+  j.status = 'Sending'; j.msg = 'Checking Shifts for time off already there…'; render();
+  const span = [Date.parse(items[0].startUtc) - 3 * 864e5, Date.parse(items[items.length - 1].endUtc) + 3 * 864e5];   // the reader lists time off fully inside its window: ±3 days catches leave entered for several days
+  const r = await readerCall({ action:'readteam', teamId, winFrom:iso(span[0]), winTo:iso(span[1]), names:false });
+  const uid = ((r.members || []).find(m => String(m.mail || '').toLowerCase() === a.email.toLowerCase()) || {}).id;
+  if (!uid) return done('Failed', `${a.email} isn't a member of the ${W.ACC[a.acc].name} Shifts team, so the time off can't be added.`);
+  const there = it => (r.timeOff || []).some(x => x.userId === uid && Date.parse(x.start) < Date.parse(it.endUtc) && Date.parse(x.end) > Date.parse(it.startUtc));
+  const send = items.filter(it => !there(it)), had = items.length - send.length;
+  if (!send.length) { W.markPublished(a.id, j.dates); return done('Confirmed', `Time off is already in Shifts for ${j.dates.join(', ')}. Nothing new was sent.`); }
+  j.msg = `Sending ${reason} to Shifts…`; render();
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 150000);
+  let res, out = {};
+  try {
+    res = await fetch(CONN.flowUrl, { method:'POST', headers:{ 'Content-Type':'application/json' }, signal:ctl.signal, body:JSON.stringify({ action:'create', source:'Workforce Tool', requestId:j.id, name:a.name, email:a.email, teamId,
+      timeOffReason:reason, portalReason:rs, theme:'pink', notes:`${j.id} · ${rs}${days[0].s.absence.remark ? ' · ' + days[0].s.absence.remark : ''}`.slice(0, 500), approvedBy:W.ME.name, approvedAt:new Date().toISOString(), items:send, timeOffIds:[] }) });
+    out = await res.json().catch(() => ({}));
+  } catch (e) { return done('Failed', e.name === 'AbortError' ? 'The Shifts flow didn\'t answer in 2.5 minutes; it may still finish. Retry checks Shifts first, so it won\'t add the time off twice.' : 'Could not reach the Shifts flow: ' + e.message); }
+  finally { clearTimeout(timer); }
+  if (!res.ok) return done('Failed', `The Shifts flow returned ${res.status}${out.message ? ': ' + out.message : ''}. Retry checks Shifts first.`);
+  j.timeOffIds = Array.isArray(out.timeOffIds) ? out.timeOffIds : [];
+  W.markPublished(a.id, j.dates);
+  done('Confirmed', `Time off in Shifts: ${reason}, ${send.map(x => x.date).join(', ')} (${j.timeOffIds.length || send.length} entr${(j.timeOffIds.length || send.length) === 1 ? 'y' : 'ies'})${had ? `; ${had} day${had === 1 ? ' was' : 's were'} already there` : ''}. The shift stays.`);
+  const { error } = await DB.sb.from('wft_sync_jobs').insert({ id:(crypto.randomUUID ? crypto.randomUUID() : j.id + '-' + Date.now()), person_id:a.id, account_id:a.acc, action:j.action, dates:j.dates, endpoint:j.endpoint, status:'Confirmed', msg:j.msg, team:teamId, notes:j.timeOffIds.length ? 'timeOffIds: ' + j.timeOffIds.join(',') : null });
+  if (error) console.warn('sync job log', error.message);
 }
 async function dbPublishJob(j, a) {
   const probe=await pubCall({...W.publishPayload(a,W.dayRuns(j.dates)[0],(W.teamFor(a)||{}).teamId||W.ACC[a.acc].teamId),action:'preview'}); if(!probe.ok||probe.b.publisherVersion!==3){j.status='Not sent';j.msg='The publishing connection needs its activities update. Ask the administrator to install the new connection package; no shifts were changed.';W.audit('Shifts sync','Publishing blocked',a.name,'',j.status,j.msg);render();return;}
