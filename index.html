@@ -4533,9 +4533,13 @@ const bKey = (id, d) => id + '|' + d;
 const bCode = (a, d) => B.draft[bKey(a.id, d)] ?? W.sched(a, d).code;
 const bReason=(a,d)=>B.tags[bKey(a.id,d)] ?? (W.sched(a,d).rest || W.sched(a,d).absence?.reason || '');
 const bLocked = (a,d)=>{const k=bKey(a.id,d),r=bReason(a,d);return B.tags[k]!==undefined ? !!r&&r!=='OFF'&&!W.RCFG[r]?.rest : W.fullOff(W.sched(a,d));};
-/* Copy previous week "as is" (2026-10-30): a leave day copies the person's usual shift for that weekday (the same weekday in up to
-   6 earlier weeks without leave), not the hours the leave was plotted at. null = no usual shift on record: the day is left as it is. */
-const bCopySource = (a, d) => { if (!bLocked(a, d)) return bCode(a, d); for (let w = 1; w <= 6; w++) { const p = addD(d, -7 * w); if (!bLocked(a, p)) return bCode(a, p); } return null; };
+/* Copy previous week "as is" (2026-10-30): a leave day copies the person's usual shift, not the hours the leave was plotted at. Usual =
+   their most common working shift in that same week (schedules rotate: Laura Vanessa Rodriguez Vargas moved from 16:00–04:00 to
+   06:00–18:00 the week of her leave); a week of only leave falls back to the shift on the same weekday in up to 6 earlier weeks. null = left as it is. */
+const bCopySource = (a, d) => { if (!bLocked(a, d)) return bCode(a, d);
+  const ws = weekStart(d), n = {}; for (let i = 0; i < 7; i++) { const x = addD(ws, i), c = bCode(a, x); if (x !== d && c !== 'OFF' && !bLocked(a, x)) n[c] = (n[c] || 0) + 1; }
+  const top = Object.entries(n).sort((p, q) => q[1] - p[1])[0]; if (top) return top[0];
+  for (let w = 1; w <= 6; w++) { const p = addD(d, -7 * w), c = bCode(a, p); if (!bLocked(a, p) && c !== 'OFF') return c; } return null; };   // leave is only plotted on working days
 const bTemplates = () => Object.keys(W.SHIFTS).filter(k => k !== 'OFF').sort((x, y) => !!W.SHIFTS[y].saved - !!W.SHIFTS[x].saved || (W.SHIFTS[x].s % 1440) - (W.SHIFTS[y].s % 1440) || W.SHIFTS[x].e - W.SHIFTS[y].e);   // saved times first
 const bHrs = c => c === 'OFF' ? 0 : (W.SHIFTS[c].e - W.SHIFTS[c].s) / 60;
 function bChecks(a, ds) {
