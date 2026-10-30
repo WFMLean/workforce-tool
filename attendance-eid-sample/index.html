@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Attendance Line — EID Login Sample</title>
+<style>
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#203d32;background:#f4f7f3}*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #7bb99c;outline-offset:3px}.shell{min-height:100vh;display:grid;grid-template-columns:42% 1fr}.brand{background:#193b30;color:white;padding:42px;display:flex;flex-direction:column}.logo{font-size:18px;font-weight:700;letter-spacing:3px}.logo span{color:#bddba0}.story{margin:auto 0;padding:60px 0}.eyebrow{font-size:10px;letter-spacing:2px;font-weight:700;color:#7a986b}.story .eyebrow{color:#b8d29e}.story h1{font-size:clamp(40px,4vw,64px);font-weight:500;letter-spacing:-2px;line-height:1.1}.story h1 em{font-style:normal;color:#c6dfa7}.story p{max-width:350px;font-size:14px;line-height:1.9;color:#b9ccbf}.brand-foot{font-size:11px;color:#adc0b1}.main{padding:50px 35px;display:flex;align-items:center;justify-content:center}.card{max-width:410px;width:100%}.badge{display:inline-block;font-size:10px;color:#587343;background:#ebf2df;border:1px solid #dbe7ca;padding:8px 10px;border-radius:5px}h2{font-size:34px;line-height:1.2;letter-spacing:-1px;font-weight:500;margin:24px 0 14px}p{font-size:13px;color:#7d8c7e;line-height:1.8}label{display:block;font-size:12px;font-weight:600;margin:24px 0 9px}input,select{width:100%;padding:14px;border:1px solid #d9e2d4;border-radius:8px;background:white;color:#234a37;font-size:14px}.primary{padding:14px 18px;border:0;border-radius:8px;background:#1e654e;color:white;font-weight:600;width:100%;margin-top:23px}.primary:hover{background:#174e3c}.sample{padding:18px;border:1px solid #dee7d6;background:#f9fbf6;border-radius:9px;margin-top:24px}.sample strong{font-size:12px}.sample p{font-size:12px;margin:9px 0 0}.sample code{font-size:13px;color:#315d43;font-weight:600}.small{font-size:11px;line-height:1.8}.error{background:#fff0e9;color:#a14635;border:1px solid #efdbd1;padding:12px;border-radius:7px;font-size:12px;line-height:1.6;margin-top:16px}.hint{background:#fff8e5;border:1px solid #eadfc0;color:#8c763f;padding:12px 15px;border-radius:7px;font-size:11px;line-height:1.7}.workspace{max-width:970px;margin:auto;padding:38px 24px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}.top .logo{font-size:15px}.secondary{border:1px solid #d7e2d1;border-radius:7px;background:white;color:#547048;padding:10px 14px;font-size:12px}.heading{margin:35px 0 26px}.heading h2{font-size:32px;margin:12px 0}.panel{padding:28px;border-radius:12px;border:1px solid #dfe7d8;background:white}.section-title{font-size:17px;font-weight:600}.shift{padding:16px;background:#f4f8ee;border:1px solid #dfe9d2;border-radius:8px;margin-top:15px}.shift strong{font-size:14px}.shift p{margin:6px 0 0;font-size:11px}.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}.choice{position:relative;border:1px solid #dbe4d4;background:#fff;border-radius:9px;padding:19px 13px;text-align:left;color:#68805b}.choice strong{display:block;font-size:14px;margin-bottom:8px}.choice span{font-size:11px;color:#92a187}.choice[aria-pressed=true]{background:#edf5e2;border-color:#779d61;box-shadow:inset 0 0 0 1px #779d61}.divider{border-top:1px solid #e9eee4;margin:28px 0}.footer{margin-top:32px;font-size:10px;color:#94a28a;display:flex;justify-content:space-between;gap:15px}.success{text-align:center;padding:40px 16px}.success-icon{font-size:36px;background:#ebf4e1;border-radius:50%;height:76px;width:76px;display:grid;place-items:center;color:#638c4f;margin:auto}.success h2{font-size:29px}.success .primary{max-width:300px}.hidden{display:none!important}.signing{font-size:12px;color:#9ba88f}.row{display:flex;justify-content:space-between;align-items:center;gap:15px}.tag{font-size:10px;padding:6px 9px;border-radius:4px;background:#fff6dd;color:#957529}.identity{font-size:13px;color:#537047}.identity strong{display:block;font-size:15px;color:#35573d;margin-bottom:5px}@media(max-width:700px){.shell{grid-template-columns:1fr}.brand{padding:26px}.story{padding:28px 0 5px}.story h1{font-size:37px;letter-spacing:-1px;margin:10px 0 20px}.story h1 br:nth-child(2){display:none}.story p,.brand-foot{display:none}.main{padding:32px 24px}.card{max-width:none}h2{font-size:29px}.workspace{padding:25px 17px}.panel{padding:22px 17px}.choices{gap:7px}.choice{padding:17px 10px}.choice strong{font-size:12px}.choice span{font-size:9px}.row{align-items:flex-start}.heading h2{font-size:28px}.footer{flex-direction:column}.top .logo{font-size:12px}.badge{font-size:9px}}
+</style>
+</head>
+<body>
+<section id="login" class="shell">
+<aside class="brand"><div class="logo"><span>▦</span> CRANE</div><div class="story"><span class="eyebrow">ATTENDANCE LINE · SAMPLE</span><h1>Your ID.<br>Your shift.<br><em>Your update.</em></h1><p>A simple way to report whether you will attend your scheduled shift.</p></div><div class="brand-foot">Fictional sample · no real employee records</div></aside>
+<main class="main"><div class="card"><span class="badge">EID / ID NUMBER LOGIN SAMPLE</span><h2>Sign in with<br>your employee ID.</h2><p>Enter a sample EID or ID number to open the agent attendance form.</p>
+<form id="login-form"><label for="employee-id">EID or ID number</label><input id="employee-id" autocomplete="off" placeholder="Enter 1001" maxlength="40" required><div id="login-error" class="error hidden" role="alert"></div><button class="primary" type="submit">Continue →</button></form>
+<div class="sample"><strong>Try this sample account</strong><p>EID: <code>1001</code><br>ID number: <code>1122334455</code><br>Both open the same fictional agent.</p></div><p class="small">This sample uses EID-only entry. The production app’s identity verification remains in place.</p></div></main>
+</section>
+<section id="workspace" class="workspace hidden"><header class="top"><div class="logo">▦ CRANE <span class="signing"> / ATTENDANCE LINE</span></div><button class="secondary" id="logout">Sign out</button></header><div class="hint"><strong>Sample workspace.</strong> Fictional agent and schedule. No notices are sent to supervisors or WFM.</div><div class="heading"><span class="eyebrow">MY ATTENDANCE</span><h2>A quick update. A prepared team.</h2><div class="identity"><strong id="agent-name"></strong><span id="agent-id"></span></div></div>
+<section id="report-panel" class="panel"><div class="section-title">01 · Your scheduled shift</div><div class="shift"><strong id="shift-time"></strong><p>Colombia time · fictional schedule</p></div><div class="divider"></div><div class="section-title">02 · How is your attendance?</div><p>Choose the update that applies to your shift.</p><form id="report-form"><div class="choices"><button class="choice" type="button" data-status="Attending" aria-pressed="false"><strong>✓ Attending</strong><span>I will attend</span></button><button class="choice" type="button" data-status="Absent" aria-pressed="false"><strong>× Absent</strong><span>I cannot attend</span></button><button class="choice" type="button" data-status="Late" aria-pressed="false"><strong>◷ Late</strong><span>I will arrive late</span></button></div><div id="reason-group" class="hidden"><label for="reason">Reason</label><select id="reason"><option value="">Select a reason</option><option>Medical reason</option><option>Family emergency</option><option>Transport issue</option><option>Personal emergency</option><option>Other</option></select><p class="small">A general reason is enough. No diagnosis or medical details.</p></div><div id="eta-group" class="hidden"><label for="eta">Expected arrival · your device’s local time</label><input id="eta" type="datetime-local"></div><div id="report-error" class="error hidden" role="alert"></div><button class="primary" type="submit">Submit attendance →</button><p class="small">Saved only as a sample on this device.</p></form></section>
+<section id="confirmation" class="panel success hidden"><div class="success-icon">✓</div><span class="eyebrow" style="display:block;margin-top:24px">SAMPLE UPDATE RECEIVED</span><h2>Your sample report is saved.</h2><p id="receipt"></p><span id="timing" class="tag"></span><p class="small">No real attendance record or notification was created.</p><button class="primary" id="again">Try another update</button></section><footer class="footer"><span>CRANE WORLDWIDE LOGISTICS · EID LOGIN SAMPLE</span><span>Fictional data · private agent view</span></footer></section>
+<script>
+'use strict';
+const people = [{ eid: '1001', id: '1122334455', name: 'Alex Sample' }, { eid: '1002', id: '2233445566', name: 'Jamie Example' }];
+const byId = id => document.getElementById(id);
+let person = null;
+let status = '';
+let shift = null;
+const show = (id, visible) => byId(id).classList.toggle('hidden', !visible);
+const error = (id, message) => { byId(id).textContent = message; show(id, true); };
+const format = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Bogota', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+function resetReport() {
+    status = '';
+    document.querySelectorAll('[data-status]').forEach(button => button.setAttribute('aria-pressed', 'false'));
+    byId('reason').value = '';
+    byId('eta').value = '';
+    show('reason-group', false);
+    show('eta-group', false);
+    show('report-error', false);
+    show('report-panel', true);
+    show('confirmation', false);
+}
+byId('login-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const id = byId('employee-id').value.trim();
+    const match = people.find(row => row.eid === id || row.id === id);
+    if (!match) return error('login-error', 'Sample ID not found. Try EID 1001 or ID number 1122334455.');
+    person = match;
+    shift = { start: Date.now() + 90 * 60000, end: Date.now() + 10.5 * 3600000 };
+    byId('agent-name').textContent = person.name;
+    byId('agent-id').textContent = 'EID ' + person.eid;
+    byId('shift-time').textContent = format(shift.start) + ' — ' + format(shift.end);
+    show('login-error', false);
+    resetReport();
+    show('login', false);
+    show('workspace', true);
+});
+document.querySelectorAll('[data-status]').forEach(button => button.addEventListener('click', () => {
+    status = button.dataset.status;
+    document.querySelectorAll('[data-status]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    show('reason-group', status !== 'Attending');
+    show('eta-group', status === 'Late');
+    show('report-error', false);
+}));
+byId('report-form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (!status) return error('report-error', 'Choose Attending, Absent or Late.');
+    if (status !== 'Attending' && !byId('reason').value) return error('report-error', 'Select a reason before submitting.');
+    const eta = byId('eta').value;
+    if (status === 'Late' && (!eta || Date.parse(eta) <= Date.now())) return error('report-error', 'Choose an expected arrival in the future.');
+    const reportedAt = Date.now();
+    const minutes = (shift.start - reportedAt) / 60000;
+    const timing = status === 'Attending' ? 'Attendance confirmed' : minutes < 0 ? 'After shift start' : minutes <= 120 ? 'Within 2 hours — urgent sample' : 'Advance notice';
+    const report = { eid: person.eid, name: person.name, status, reason: status === 'Attending' ? '' : byId('reason').value, eta: status === 'Late' ? eta : null, reportedAt, timing, sample: true };
+    try { localStorage.setItem('crane-eid-only-demo-' + person.eid, JSON.stringify(report)); }
+    catch { return error('report-error', 'Browser storage is unavailable. Enable storage to save this sample.'); }
+    byId('receipt').textContent = person.name + ' · ' + status + (report.reason ? ' · ' + report.reason : '');
+    byId('timing').textContent = timing;
+    show('report-panel', false);
+    show('confirmation', true);
+});
+byId('again').addEventListener('click', resetReport);
+byId('logout').addEventListener('click', () => { person = null; shift = null; byId('employee-id').value = ''; show('workspace', false); show('login', true); });
+</script>
+</body>
+</html>
