@@ -1791,7 +1791,7 @@ function loadLiveTeam(accId, J, opt = {}) {
     o.breaks=x.main.parts.flatMap(p=>p.activities||[]);o.breaksFor=codes[id][d];o.remoteOT=x.main.ot;o.remoteExtra=x.others;
   }));
   const applyTag=(id,d,rs,start,end)=>{const a=AGI[id];if(!a)return;const o=OV[kOf(id,d)]=OV[kOf(id,d)]||{};
-    if(RCFG[rs].rest){o.restStart=start??imported[id]?.[d]?.main.s;o.restEnd=end??imported[id]?.[d]?.main.e;o.code='OFF';o.rest=rs;delete o.absence;}
+    if(RCFG[rs].rest){o.restStart=start??imported[id]?.[d]?.main.s;o.restEnd=end??imported[id]?.[d]?.main.e;o.code='OFF';o.rest=rs;o.restSrc='Shifts';delete o.absence;}
     else o.absence={reason:rs,remark:'From Shifts',source:'Shifts',by:'Shifts',at:''};
   };
   /* Leave counts only for the part of the shift it covers: none = ignored, most of it = whole day, otherwise part-day minutes. */
@@ -1945,11 +1945,14 @@ const clockRow = (k, file) => { const [id, d] = k.split('|'), a = AGI[id]; retur
 function applySavedDays(rows) {
   let n = 0;
   (rows || []).forEach(r => { const a = AGI[r.person_id]; if (!a) return; const o = OV[kOf(a.id, r.d)] = OV[kOf(a.id, r.d)] || {};
+    /* a row copied from Shifts is an older copy: its leave must not undo the time off this read just took from Shifts (vacation entered after the copy was saved) */
+    const tag = r.updated_by === 'Shifts' && (!r.absence_reason || r.absence_source === 'Shifts') ? { rest:o.restSrc === 'Shifts' ? o.rest : '', restStart:o.restStart, restEnd:o.restEnd, absence:o.absence && o.absence.source === 'Shifts' ? o.absence : null } : null;
     if (r.off) {o.code = 'OFF';o.restStart=r.start_min??undefined;o.restEnd=r.end_min??undefined;} else if (r.start_min != null && r.end_min != null) o.code = ensureTemplate(r.start_min, r.end_min, 'Workforce Tool');
     if (o.code === baseCode(a, r.d)) delete o.code;
     if(r.off && RCFG[r.absence_reason]?.rest) {o.rest=r.absence_reason;delete o.absence;} else if (r.absence_reason) o.absence = { reason: r.absence_reason, remark: r.absence_remark || '', source: r.absence_source || 'Workforce Tool', fullDay:r.absence_source==='Workforce Tool · whole day', mins:o.absence && o.absence.reason === r.absence_reason ? o.absence.mins : undefined, by: r.updated_by || '', at: String(r.updated_at || '').slice(0, 16).replace('T', ' ') }; else delete o.absence;
     if(!r.off || !RCFG[r.absence_reason]?.rest)delete o.rest;
     if (r.shift_note) o.shiftNote = r.shift_note; else delete o.shiftNote;
+    if (tag) { if (tag.rest) { o.code = 'OFF'; o.rest = tag.rest; o.restSrc = 'Shifts'; o.restStart = tag.restStart; o.restEnd = tag.restEnd; delete o.absence; } else if (tag.absence) o.absence = tag.absence; else if (o.absence && o.absence.source === 'Shifts') delete o.absence; }
     if (r.remark) o.remark = r.remark; if (r.breaks) { o.breaks = r.breaks; o.breaksFor = o.code || baseCode(a, r.d); } o.fromShifts = r.updated_by === 'Shifts'; o.at = o.fromShifts ? 0 : Date.parse(r.updated_at) || 0; if(o.fromShifts) PUBOK[kOf(a.id,r.d)] = Date.now(); n++; });
   emit(); return n;
 }
