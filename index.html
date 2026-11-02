@@ -1837,6 +1837,29 @@ function loadTeamRequests(accId, J) {
   keep(REQ, r => !(ids.has(r.agent) && r.source === 'Teams' && r.shiftsId));
   REQ.push(...next); emit(); return { available:true, count:next.length, unmatched };
 }
+/* Teams swap and offer requests (reader v7 'readswaps', 2026-10-31). Read-only for now: they are decided in Teams; the tool shows them with
+   the rule checks. A request names shift IDs, not days, so the days come from the shifts the reader loaded; requests whose shifts are not
+   loaded (older than the loaded weeks) are counted, not shown. */
+function loadTeamSwaps(accId, J) {
+  if (!Array.isArray(J.swaps)) return { available:false, count:0, unmatched:0, outside:0 };
+  const ids = new Set(AG.filter(a => a.acc === accId).map(a => a.id)), sh = new Map((J.shifts || []).filter(x => x.id).map(x => [x.id, x]));
+  const day = id => { const x = sh.get(id); return x && x.start ? toZoneLocal(accId, x.start)[0] : ''; }, ts = v => v ? String(v).slice(0,16).replace('T',' ') : '';
+  const used = new Set(SWAPS.filter(x => !x.teams).map(x => x.id)), next = []; let unmatched = 0, outside = 0;
+  const add = (q, offer) => {
+    const A = AGI[q.senderUserId], B = AGI[q.recipientUserId];
+    if (!q.id || !A || !B || A.acc !== accId || B.acc !== accId) { unmatched++; return; }
+    const da = day(q.senderShiftId), db = offer ? da : day(q.recipientShiftId);
+    if (!da || !db) { outside++; return; }
+    let id = 'TS-' + String(q.id).replace(/[^A-Za-z0-9]/g, '').slice(-6); while (used.has(id)) id += '·'; used.add(id);
+    const status = q.state === 'approved' ? 'Approved' : q.state === 'declined' ? 'Declined' : q.state === 'pending' ? (q.assignedTo === 'recipient' ? 'Waiting for coworker' : 'Pending approval') : 'Unknown';
+    next.push({ id, shiftsId:q.id, teams:true, type:offer ? 'offer' : da === db ? 'same' : 'days', a:A.id, b:B.id, da, db, note:q.senderMessage || '', coworkerNote:q.recipientActionMessage || '',
+      received:ts(q.senderDateTime || q.createdDateTime), status, source:'Teams Shifts', decidedBy:(AGI[q.managerUserId] || {}).name || (q.managerUserId ? 'Manager in Teams' : ''),
+      decidedAt:ts(q.managerActionDateTime), decisionNote:q.managerActionMessage || '' });
+  };
+  J.swaps.forEach(q => add(q, false)); (J.offers || []).forEach(q => add(q, true));
+  keep(SWAPS, x => !(x.teams && (ids.has(x.a) || ids.has(x.b))));
+  SWAPS.push(...next); emit(); return { available:true, count:next.length, unmatched, outside };
+}
 /* what publishing sends: one request per run of consecutive days for one person (window = those site days, shifts in UTC) */
 function publishPayload(a, dates, teamId) {
   const ds = [].concat(dates).sort(), utc = (day, min) => new Date(toUtcMs(a.acc, day, min)).toISOString().replace(/\.\d+Z$/, 'Z');   // account (Shifts team) time zone, not the person's site
@@ -2013,7 +2036,7 @@ function applySwapSilently(sw, by, at) {
   return m;
 }
 function decideSwap(id, ok, note, by) {
-  const sw = SWAPS.find(x => x.id === id), A = AGI[sw.a], B = AGI[sw.b]; by = by || ME.name; sw.auto = by.startsWith('System');
+  const sw = SWAPS.find(x => x.id === id), A = AGI[sw.a], B = AGI[sw.b]; if (sw.teams) return;   // decided in Teams by = by || ME.name; sw.auto = by.startsWith('System');
   if (ok) {
     const before = swapDates(sw).map(d => `${A.name.split(' ')[0]} ${shiftLabel(sched(A, d).code)} / ${B.name.split(' ')[0]} ${shiftLabel(sched(B, d).code)} (${fmtS(d)})`).join('; ');
     applySwapSilently(sw, by);
@@ -2032,7 +2055,7 @@ function swapVerdict(sw) {
   return { act: 'approve', why: 'Coverage holds and every rule passes' };
 }
 function processSwap(sw, silent) {
-  if (!SWAP_RULES.auto || sw.status !== 'Pending approval') return null;
+  if (!SWAP_RULES.auto || sw.status !== 'Pending approval' || sw.teams) return null;   // Teams requests are decided in Teams (read-only feed)
   const v = swapVerdict(sw);
   if (v.act === 'approve') decideSwap(sw.id, true, 'Auto-approved: ' + v.why, 'System · auto-approval');
   else if (v.act === 'decline') decideSwap(sw.id, false, 'Auto-declined: ' + v.why, 'System · auto-approval');
@@ -2235,7 +2258,7 @@ global.WF = {
   // utils
   pad, iso, parse, addD, diffD, dow, range, weekStart, hm, esc, fmtD, fmtS, DOW, pct, fmtPct, dur, initials, TODAY, hashKey,
   // data
-  kOf, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
+  kOf, loadTeamSwaps, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
   // logic
   get clock() { return WFc.clock; }, set clock(v) { WFc.clock = v; if (WFc.day === TODAY && Math.abs(v - realMin()) > 2) WFc.live = false; emit(); }, realMin,
   get floor() { return { day: WFc.day, clock: WFc.clock, live: WFc.live, zone: WFc.zone }; }, setFloor, lastClockDay,
@@ -2768,7 +2791,7 @@ async function refreshScheduleReads() {
  try { for(const acc of W.LIVE.accs.filter(inScope)) await dbShiftsCheck(acc,null,true,true); }
  finally { scheduleReadBusy=false; }
 }
-setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))(S.page === 'requests' ? refreshTeamRequests() : refreshScheduleReads());},60000);
+setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests','swaps'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))(['requests','swaps'].includes(S.page) ? refreshTeamRequests() : refreshScheduleReads());},60000);
 
 /* OT tag beside a shift: hours of overtime that day (OT shifts from Teams, or an OT / Overtime activity) */
 const otText = m => m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ' ' + m % 60 + 'm' : ''}` : `${m}m`;
@@ -3706,8 +3729,10 @@ function pSwaps() {
   const inTab = sw => S.swTab === 'Decided' ? ['Approved','Declined'].includes(sw.status) : sw.status === S.swTab;
   const list = W.SWAPS.filter(sw => swOk(sw) && inTab(sw)).sort((a, b) => S.swTab === 'Decided' ? b.decidedAt.localeCompare(a.decidedAt) : a.da.localeCompare(b.da));
   if (!list.some(x => x.id === S.swSel)) S.swSel = list[0] ? list[0].id : null;
-  const sw = W.SWAPS.find(x => x.id === S.swSel), passing = W.SWAPS.filter(x => swOk(x) && x.status === 'Pending approval' && W.swapCheck(x).result === 'pass');
-  return `<div class="head"><div class="grow"><div class="kicker">From Microsoft Teams Shifts · agent requests → coworker accepts → you approve</div><h1>Shift <b>swaps</b></h1><p class="sub">${W.SWAP_RULES.auto ? 'Auto-approval is <b>on</b>. When the coworker accepts in Teams, the swap is approved if coverage holds and every rule passes. If coverage isn\'t enough it is declined, even though both agents agreed. Only exceptions come here for review.' : 'Auto-approval is <b>off</b>. Every accepted swap waits here for an RTA.'}</p></div>
+  const sw = W.SWAPS.find(x => x.id === S.swSel), passing = W.SWAPS.filter(x => swOk(x) && !x.teams && x.status === 'Pending approval' && W.swapCheck(x).result === 'pass');
+  const swErr = Object.entries(DB.swaps || {}).filter(([acc, x]) => x.err && (S.acc === 'all' || S.acc === acc)), swOut = Object.values(DB.swaps || {}).reduce((n, x) => n + (x.outside || 0), 0);
+  const swNote = (swErr.length ? `<p class="note warn">Swap requests not read for ${swErr.map(([acc, x]) => esc(W.ACC[acc].name) + ' (' + esc(x.err) + ')').join(', ')}.</p>` : '') + (swOut ? `<p class="note">${swOut} older Teams request${swOut === 1 ? '' : 's'} not shown: their shifts are outside the loaded weeks.</p>` : '');
+  return swNote + `<div class="head"><div class="grow"><div class="kicker">From Microsoft Teams Shifts · agent requests → coworker accepts → decided in Teams</div><h1>Shift <b>swaps</b></h1><p class="sub">${W.SWAP_RULES.auto ? 'Auto-approval is <b>on</b>. When the coworker accepts in Teams, the swap is approved if coverage holds and every rule passes. If coverage isn\'t enough it is declined, even though both agents agreed. Only exceptions come here for review.' : 'Auto-approval is <b>off</b>. Every accepted swap waits here for an RTA.'}</p></div>
     <div class="seg">${tabs.map(([k, l]) => `<button class="${S.swTab === k ? 'on' : ''}" data-a="swTab" data-v="${k}">${l} <span class="num" style="opacity:.6">${W.SWAPS.filter(x => swOk(x) && (k === 'Decided' ? ['Approved','Declined'].includes(x.status) : x.status === k)).length}</span></button>`).join('')}</div>
     ${S.swTab === 'Pending approval' && !W.SWAP_RULES.auto ? `<button class="btn pri" data-a="swBulk" ${passing.length ? '' : 'disabled'}>Approve all that pass every rule (${passing.length})</button>` : ''}</div>
   <div class="cols c12"><div>${list.map(x => { const A = W.AGI[x.a], B = W.AGI[x.b], r = x.status === 'Pending approval' ? W.swapCheck(x).result : null;
@@ -3735,7 +3760,7 @@ function swapDetail(sw) {
       ${pend ? `<div class="meta">Before</div>${W.ui.hours(x.before, x.open, x.minInt)}<div class="meta" style="margin-top:4px">After</div>` : ''}${W.ui.hours(x.after, x.open, x.minInt, x.after.map((v, h) => v !== x.before[h] ? h : -1).filter(h => h >= 0))}</div>`).join('')}
     <div class="cols c2" style="margin:10px 0"><div class="panel" style="background:var(--panel2)"><div class="kicker">Swaps this month</div><div style="margin-top:6px">${esc(A.name.split(' ')[0])} ${monthN(A)} · ${esc(B.name.split(' ')[0])} ${monthN(B)} <span class="meta">(limit ${W.SWAP_RULES.maxPerMonth})</span></div></div>
       <div class="panel" style="background:var(--panel2)"><div class="kicker">After approval</div><div class="meta" style="margin-top:6px">Both schedules update, the cells show ⇄ with the swap ID, Shifts gets the approval, and Teams notifies both agents.</div></div></div>
-    ${pend && sw.review ? `<div class="note warn" style="margin-bottom:10px"><b>Sent to review by auto-approval:</b> ${esc(sw.review)}</div>` : ''}${pend ? `<div class="field"><label class="f" for="swNote">Note to both agents (sent in Teams)</label><textarea class="in" id="swNote" data-f="swNote" rows="2" placeholder="${C.result === 'fail' ? 'Required: explain the exception or the reason for declining' : 'Optional'}">${esc(S.swNote)}</textarea></div>
+    ${pend && sw.review ? `<div class="note warn" style="margin-bottom:10px"><b>Sent to review by auto-approval:</b> ${esc(sw.review)}</div>` : ''}${sw.teams && (pend || sw.status === 'Waiting for coworker') ? `<div class="note">${sw.status === 'Waiting for coworker' ? `${esc(B.name)} hasn't accepted in Teams yet. ` : ''}Approve or decline this request in Teams → Shifts → Requests. The tool shows it with the rule checks; deciding from the tool comes next.${sw.coworkerNote ? '<br>' + esc(B.name.split(' ')[0]) + ': ' + esc(sw.coworkerNote) : ''}</div>` : pend ? `<div class="field"><label class="f" for="swNote">Note to both agents (sent in Teams)</label><textarea class="in" id="swNote" data-f="swNote" rows="2" placeholder="${C.result === 'fail' ? 'Required: explain the exception or the reason for declining' : 'Optional'}">${esc(S.swNote)}</textarea></div>
       ${C.result === 'fail' ? '<div class="note bad" style="margin-bottom:10px">This swap breaks a rule. You can still approve it as an exception with a note. It is recorded in the audit trail.</div>' : ''}
       <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn bad" data-a="swDecline" data-v="${sw.id}">Decline</button><button class="btn pri" data-a="swApprove" data-v="${sw.id}" data-fail="${C.result === 'fail' ? 1 : ''}">${C.result === 'fail' ? 'Approve as exception' : 'Approve & publish'}</button></div>`
       : sw.status === 'Waiting for coworker' ? `<div class="note">${esc(B.name)} hasn't accepted in Teams yet. ${W.SWAP_RULES.auto ? 'When they do, the system decides automatically.' : 'You can approve once they accept.'}</div><div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn sm" data-a="swAccept" data-v="${sw.id}">Prototype: ${esc(B.name.split(' ')[0])} accepts in Teams</button></div>` : `<div class="note ${sw.status === 'Declined' ? 'bad' : ''}"><b>${sw.auto ? 'Auto-' + sw.status.toLowerCase() : sw.status}</b> by ${esc(sw.decidedBy)} · ${esc(sw.decidedAt)}${sw.decisionNote ? '<br>' + esc(sw.decisionNote) : ''}</div>`}</section>`;
@@ -4236,8 +4261,10 @@ async function dbReadTeam(accId, cached, opt = {}) {
   if (opt.history) return { shifts:parts.flatMap(p => p.shifts || []), timeOff:parts.flatMap(p => p.timeOff || []) };
   let requestData = {}, requestError = '';
   try { requestData = await dbReadRequests(accId, bg); } catch(e) { requestError = e.message; }
+  let swapData = {}, swapError = '';
+  try { swapData = await dbReadSwaps(accId, bg); } catch(e) { swapError = e.message; }
   const old = list => reuse ? (list || []).filter(x => { const t = Date.parse(x.start); return t >= fullFrom && t < from; }) : [];   // history the fresh read did not cover
-  return { ...parts[0], complete:!requestError && Array.isArray(requestData.requests), ...(Array.isArray(requestData.requests) ? {requests:requestData.requests} : {}), requestError, partial, from:iso(new Date(partial ? from : fullFrom)), to:iso(new Date(to)), reusedHistory:reuse, fullAt:reuse ? (cp.fullAt || cached.captured_at) : new Date().toISOString(),
+  return { ...parts[0], complete:!requestError && Array.isArray(requestData.requests), ...(Array.isArray(requestData.requests) ? {requests:requestData.requests} : {}), requestError, ...(Array.isArray(swapData.swaps) ? {swaps:swapData.swaps, offers:swapData.offers || []} : {}), swapError, partial, from:iso(new Date(partial ? from : fullFrom)), to:iso(new Date(to)), reusedHistory:reuse, fullAt:reuse ? (cp.fullAt || cached.captured_at) : new Date().toISOString(),
     shifts:[...parts.flatMap(p => p.shifts || []), ...old(cp && cp.shifts)].filter(x => keep('s' + (x.id || x.userId + x.start + x.end))),
     timeOff:[...parts.flatMap(p => p.timeOff || []), ...old(cp && cp.timeOff)].filter(x => keep('t' + x.userId + x.start + x.end + x.reasonId)) };
 }
@@ -4248,12 +4275,21 @@ async function dbReadRequests(accId, bg = false) {
   if (data.requests.length >= 5000) throw new Error('Teams requests reached the 5,000-item read limit; check the flow pagination');
   return data;
 }
+/* swap and offer requests from Teams (reader v7); same queue and 90 s limit as the other reads */
+async function dbReadSwaps(accId, bg = false) {
+  const data = await readerCall({action:'readswaps',teamId:W.ACC[accId].teamId}, bg);
+  if (!data || !Array.isArray(data.swaps)) throw new Error('The reader needs the v7 swap update');
+  if (data.swaps.length >= 5000 || (data.offers || []).length >= 5000) throw new Error('Teams swap requests reached the 5,000-item read limit');
+  return data;
+}
 async function refreshTeamRequests() {
   if(scheduleReadBusy || !DB.on || !CONN.readUrl) return;
   scheduleReadBusy=true; render(); DB.requests=DB.requests||{};
   try { for (const acc of W.LIVE.accs.filter(inScope)) {
     try {const data=await dbReadRequests(acc);const result=W.loadTeamRequests(acc,{...data,reasons:(DB.requestReasons || {})[acc] || []});DB.requests[acc]={...result,err:'',at:new Date().toLocaleTimeString()};}
     catch(e){DB.requests[acc]={...(DB.requests[acc]||{}),err:e.message,at:new Date().toLocaleTimeString()};}
+    try {const data=await dbReadSwaps(acc);DB.swaps=DB.swaps||{};DB.swaps[acc]={...W.loadTeamSwaps(acc,{...data,shifts:(DB.lastShifts||{})[acc]||[]}),err:'',at:new Date().toLocaleTimeString()};}
+    catch(e){DB.swaps=DB.swaps||{};DB.swaps[acc]={...(DB.swaps[acc]||{}),err:e.message,at:new Date().toLocaleTimeString()};}
   }} finally {scheduleReadBusy=false;render();}
 }
 async function dbShiftsCheck(accId, J, auto = true, bg = false) {
@@ -4264,6 +4300,9 @@ async function dbShiftsCheck(accId, J, auto = true, bg = false) {
   DB.requestReasons=DB.requestReasons||{}; DB.requestReasons[accId]=J.reasons || [];
   const requestResult = W.loadTeamRequests(accId,J);
   DB.requests[accId] = { ...requestResult, err:J.requestError || (!requestResult.available ? 'Teams request reader is not configured' : ''), at:new Date().toLocaleTimeString() };
+  DB.lastShifts = DB.lastShifts || {}; DB.lastShifts[accId] = J.shifts || []; DB.swaps = DB.swaps || {};   // swap requests name shift IDs; days come from these shifts
+  if (Array.isArray(J.swaps)) DB.swaps[accId] = { ...W.loadTeamSwaps(accId, J), err:'', at:new Date().toLocaleTimeString() };
+  else DB.swaps[accId] = { ...(DB.swaps[accId] || {}), err:J.swapError || 'Teams swap reader is not configured', at:new Date().toLocaleTimeString() };
   const opt = { site, from:TODAY, to:W.addD(TODAY, 34) };   // past days are history: the tool never sends them
   let c = W.shiftsCheck(accId, J, opt), took = [];
   if (auto) { c.rows.filter(r => r.side === 'shifts' && !(typeof B !== 'undefined' && (B.draft[r.k] !== undefined || B.brk[r.k] !== undefined))).forEach(r => { if (W.adoptShifts(r)) took.push({ name:r.a.name, d:r.d, from:r.tool, to:r.shiftsLbl }); }); if (took.length) c = W.shiftsCheck(accId, J, opt); }
@@ -5222,7 +5261,7 @@ const A = {
   swSel: el => { S.swSel = el.dataset.v; S.swNote = ''; render(); },
   swApprove: el => { if (el.dataset.fail && !S.swNote.trim()) { $('swNote').focus(); return toast('This swap breaks a rule: add a note to approve it as an exception'); } W.decideSwap(el.dataset.v, true, (el.dataset.fail ? 'Exception: ' : '') + S.swNote.trim()); S.swNote = ''; toast('Swap approved · both schedules updated · publishing to Shifts'); render(); },
   swDecline: el => { if (!S.swNote.trim()) { $('swNote').focus(); return toast('Add a note for both agents before declining'); } W.decideSwap(el.dataset.v, false, S.swNote.trim()); S.swNote = ''; toast('Swap declined · agents notified in Teams'); render(); },
-  swBulk: () => { const l = W.SWAPS.filter(x => swOk(x) && x.status === 'Pending approval' && W.swapCheck(x).result === 'pass'); l.forEach(x => W.decideSwap(x.id, true, 'Bulk approval · passes every rule')); toast(`${l.length} swap${l.length === 1 ? '' : 's'} approved`); render(); },
+  swBulk: () => { const l = W.SWAPS.filter(x => swOk(x) && !x.teams && x.status === 'Pending approval' && W.swapCheck(x).result === 'pass'); l.forEach(x => W.decideSwap(x.id, true, 'Bulk approval · passes every rule')); toast(`${l.length} swap${l.length === 1 ? '' : 's'} approved`); render(); },
   auWk: el => { S.auWk = +el.dataset.v; S.auPick.clear(); render(); },
   auF: el => { S.auF = el.dataset.v; render(); },
   auPick: el => { el.checked ? S.auPick.add(el.dataset.v) : S.auPick.delete(el.dataset.v); render(); },
