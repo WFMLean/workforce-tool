@@ -1904,7 +1904,8 @@ function shiftsCheck(accId, J, opt = {}) {
     st.side[side]++;
     rows.push({ k, a, d, type, side, station: a.station || (LOB[a.key] || {}).name || '', tool: tw ? lbl(s.s, s.e) : s.absence ? 'Off · ' + s.absence.reason : 'Off', shifts: sh, shiftsLbl: sh.length ? sh.map(x => lbl(x.s, x.e)).join(' + ') : 'Nothing', pubAt: pub, editAt: o.at || 0 });
   }));
-  return (SCHK[accId] = { acc: accId, site, at: stamp(), from, to, rows, st, unknown: [...unknown] });
+  const res = { acc: accId, site, at: stamp(), from, to, rows, st, unknown: [...unknown] };
+  return opt.keep ? res : (SCHK[accId] = res);   // keep: a side check (past days) that must not replace the Compare page's result
 }
 function adoptShifts(r) {          // make the tool match Shifts for one row (no publish back), logged as changed in Shifts
   const s = sched(r.a, r.d), sh = r.shifts[0];
@@ -4264,7 +4265,7 @@ async function dbReadTeam(accId, cached, opt = {}) {
   let swapData = {}, swapError = '';
   try { swapData = await dbReadSwaps(accId, bg); } catch(e) { swapError = e.message; }
   const old = list => reuse ? (list || []).filter(x => { const t = Date.parse(x.start); return t >= fullFrom && t < from; }) : [];   // history the fresh read did not cover
-  return { ...parts[0], complete:!requestError && Array.isArray(requestData.requests), ...(Array.isArray(requestData.requests) ? {requests:requestData.requests} : {}), requestError, ...(Array.isArray(swapData.swaps) ? {swaps:swapData.swaps, offers:swapData.offers || []} : {}), swapError, partial, from:iso(new Date(partial ? from : fullFrom)), to:iso(new Date(to)), reusedHistory:reuse, fullAt:reuse ? (cp.fullAt || cached.captured_at) : new Date().toISOString(),
+  return { ...parts[0], complete:!requestError && Array.isArray(requestData.requests), ...(Array.isArray(requestData.requests) ? {requests:requestData.requests} : {}), requestError, ...(Array.isArray(swapData.swaps) ? {swaps:swapData.swaps, offers:swapData.offers || []} : {}), swapError, partial, from:iso(new Date(partial ? from : fullFrom)), to:iso(new Date(to)), freshFrom:iso(new Date(from)), reusedHistory:reuse, fullAt:reuse ? (cp.fullAt || cached.captured_at) : new Date().toISOString(),
     shifts:[...parts.flatMap(p => p.shifts || []), ...old(cp && cp.shifts)].filter(x => keep('s' + (x.id || x.userId + x.start + x.end))),
     timeOff:[...parts.flatMap(p => p.timeOff || []), ...old(cp && cp.timeOff)].filter(x => keep('t' + x.userId + x.start + x.end + x.reasonId)) };
 }
@@ -4304,8 +4305,14 @@ async function dbShiftsCheck(accId, J, auto = true, bg = false) {
   if (Array.isArray(J.swaps)) DB.swaps[accId] = { ...W.loadTeamSwaps(accId, J), err:'', at:new Date().toLocaleTimeString() };
   else DB.swaps[accId] = { ...(DB.swaps[accId] || {}), err:J.swapError || 'Teams swap reader is not configured', at:new Date().toLocaleTimeString() };
   const opt = { site, from:TODAY, to:W.addD(TODAY, 34) };   // past days are history: the tool never sends them
-  let c = W.shiftsCheck(accId, J, opt), took = [];
-  if (auto) { c.rows.filter(r => r.side === 'shifts' && !(typeof B !== 'undefined' && (B.draft[r.k] !== undefined || B.brk[r.k] !== undefined))).forEach(r => { if (W.adoptShifts(r)) took.push({ name:r.a.name, d:r.d, from:r.tool, to:r.shiftsLbl }); }); if (took.length) c = W.shiftsCheck(accId, J, opt); }
+  const took = [], drafted = r => typeof B !== 'undefined' && (B.draft[r.k] !== undefined || B.brk[r.k] !== undefined);
+  const take = rows => rows.filter(r => r.side === 'shifts' && !drafted(r)).forEach(r => { if (W.adoptShifts(r)) took.push({ name:r.a.name, d:r.d, from:r.tool, to:r.shiftsLbl }); });
+  /* past days still follow Shifts when Shifts is newer (a swap approved in Teams after the tool copied the day, a manager's fix): only the
+     last 2 weeks and only days this read covered fresh (J.freshFrom = first fresh read instant, not snapshot history; a day counts once it starts inside the read). Nothing is sent. */
+  if (auto && J.freshFrom) { const [fd, fm] = W.toZoneLocal(accId, J.freshFrom), pf = [W.addD(TODAY, -14), fm ? W.addD(fd, 1) : fd].sort()[1], pt = W.addD(TODAY, -1);
+    if (pf <= pt) take(W.shiftsCheck(accId, J, { site, from:pf, to:pt, keep:true }).rows); }
+  let c = W.shiftsCheck(accId, J, opt);
+  if (auto) { const n = took.length; take(c.rows); if (took.length > n) c = W.shiftsCheck(accId, J, opt); }
   DB.chk = DB.chk || {}; DB.chk[accId] = { at:new Date().toLocaleTimeString(), took:(took.length ? took : (DB.chk[accId] || {}).took || []), tookAt:took.length ? new Date().toLocaleTimeString() : (DB.chk[accId] || {}).tookAt };
   if (took.length) W.audit('Shifts sync', 'Took changes made in Shifts', W.ACC[accId].name, '', `${took.length} person-day${took.length === 1 ? '' : 's'}`, 'Two-way Shifts check');
   render();
