@@ -1896,6 +1896,7 @@ function shiftsCheck(accId, J, opt = {}) {
   ppl.forEach(a => range(from, to).forEach(d => {
     const s = sched(a, d), tw = s.working && !(s.absence && fullOff(s)), sh = (got[a.id] || {})[d] || [];
     if (!tw && !sh.length) return; st.checked++;
+    if (!tw && s.rest && (OV[kOf(a.id, d)] || {}).restSrc === 'Shifts') { st.match++; return; }   // a rest day in Shifts = the shift plus rest time off; the tool shows it off
     const type = sh.length > 1 ? 'dup' : tw && !sh.length ? 'missing' : !tw ? 'extra' : sh[0].s === s.s && sh[0].e === s.e ? (sh[0].activities !== null && JSON.stringify(activityRows(breaksOf(a,d,s.code))) !== JSON.stringify(activityRows(sh[0].activities)) ? 'activities' : 'match') : 'time';
     st[type]++; if (type === 'match') return; st.people.add(a.id);
     const k = kOf(a.id, d), o = OV[k] || {}, edited = 'code' in o || !!o.absence || 'breaks' in o || !!o.shiftNote, pub = PUBOK[k] || 0;
