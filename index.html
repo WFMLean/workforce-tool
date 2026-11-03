@@ -1039,7 +1039,7 @@ function editCell(id, d, ch) {
   if ('remark' in ch) o.remark = ch.remark;
   if ('shiftNote' in ch) { if (ch.shiftNote) o.shiftNote = String(ch.shiftNote).slice(0, 500); else delete o.shiftNote; }
   const oldActivities = JSON.stringify(breaksOf(a,d,before.code));
-  if ('breaks' in ch) { o.breaks = ch.breaks; o.breaksFor = o.code || baseCode(a,d); o.acts = []; }
+  if ('breaks' in ch) { o.breaks = ch.breaks; o.breaksFor = o.code || baseCode(a,d); o.acts = []; if (ch.fromShifts) o.breaksSrc = 'Shifts'; else delete o.breaksSrc; }
   if (ch.act) (o.acts = o.acts || []).push(ch.act);
   if ('clearActs' in ch) o.acts = [];
   const after = sched(a, d), what = [];
@@ -1368,7 +1368,7 @@ function shiftSignature(x) { const act=(x.activities||[]).map(a=>[a.displayName|
 function publishDraft(changes, note, reason, remark, shiftNote) {        // changes: [{id, d, code}] · reason/remark go on every shift change · shiftNote = note shown on those shifts in Shifts
   changes.forEach(c=>{const a=AGI[c.id];if(a){const code=c.code??sched(a,c.d).code;try{validateActivities(code==='OFF'?[]:(c.breaks??breaksOf(a,c.d,code)),code);}catch(e){throw Error(a.name+' · '+c.d+': '+e.message);}}});
   const byA = {};
-  changes.forEach(c => { const a = AGI[c.id]; if (!a) return; const beforeState=sched(a,c.d), before = beforeState.code, oldActivities=breaksOf(a,c.d,before), o = OV[kOf(c.id, c.d)] || (OV[kOf(c.id, c.d)] = {}); const code = c.code ?? before; if (code === baseCode(a, c.d)) delete o.code; else o.code = code; if(code!=='OFF' && c.tag===undefined)delete o.rest; if (c.breaks) { o.breaks = validateActivities(c.breaks,code); o.breaksFor = code; o.acts=[]; audit('Schedule','Shift activities updated',a.name+' · '+c.d,activityText(oldActivities),activityText(o.breaks),'Names, times, colours, codes and paid flags'); } if(c.tag!==undefined){if(Number.isFinite(c.dayStart)&&Number.isFinite(c.dayEnd)&&c.dayEnd>c.dayStart){o.restStart=c.dayStart;o.restEnd=c.dayEnd;}const r=RCFG[c.tag];if(r?.rest){o.rest=c.tag;delete o.absence;}else{delete o.rest;if(r)o.absence={reason:c.tag,remark:remark||'',source:c.fullDay===true?'Workforce Tool · whole day':'Workforce Tool',fullDay:c.fullDay===true,by:ME.name,at:stamp()};else delete o.absence;}logChange(a,c.d,{kind:'Day status',before:beforeState.rest||cellText(beforeState),after:c.tag||'Working day',reason:c.tag||'Working day',source:'Edit schedules'});}
+  changes.forEach(c => { const a = AGI[c.id]; if (!a) return; const beforeState=sched(a,c.d), before = beforeState.code, oldActivities=breaksOf(a,c.d,before), o = OV[kOf(c.id, c.d)] || (OV[kOf(c.id, c.d)] = {}); const code = c.code ?? before; if (code === baseCode(a, c.d)) delete o.code; else o.code = code; if(code!=='OFF' && c.tag===undefined)delete o.rest; if (c.breaks) { o.breaks = validateActivities(c.breaks,code); o.breaksFor = code; o.acts=[]; delete o.breaksSrc; audit('Schedule','Shift activities updated',a.name+' · '+c.d,activityText(oldActivities),activityText(o.breaks),'Names, times, colours, codes and paid flags'); } if(c.tag!==undefined){if(Number.isFinite(c.dayStart)&&Number.isFinite(c.dayEnd)&&c.dayEnd>c.dayStart){o.restStart=c.dayStart;o.restEnd=c.dayEnd;}const r=RCFG[c.tag];if(r?.rest){o.rest=c.tag;delete o.absence;}else{delete o.rest;if(r)o.absence={reason:c.tag,remark:remark||'',source:c.fullDay===true?'Workforce Tool · whole day':'Workforce Tool',fullDay:c.fullDay===true,by:ME.name,at:stamp()};else delete o.absence;}logChange(a,c.d,{kind:'Day status',before:beforeState.rest||cellText(beforeState),after:c.tag||'Working day',reason:c.tag||'Working day',source:'Edit schedules'});}
     if (before !== code || c.breaks || c.tag!==undefined) (byA[c.id] = byA[c.id] || []).push([c.d, before, code, !!c.breaks, before !== code, c.tag!==undefined && !!RCFG[c.tag]]);   // only absence/rest reasons stay tool-only; Normal Off and Working day publish
     if (before !== code && shiftNote && code !== 'OFF') o.shiftNote = String(shiftNote).slice(0, 500);
     if (before !== code && c.swap) o.swap = { with: c.swap }; else if (before !== code) delete o.swap;
@@ -1737,6 +1737,7 @@ function toUtcMs(accId, day, min) {         // a time in the account's zone → 
   const z = zoneOf(accId), t0 = Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10)) + min * 6e4, g = t0 - zoneOffAt(z, t0) * 6e4;
   return t0 - zoneOffAt(z, g) * 6e4;
 }
+const okT = v => !!v && Number.isFinite(Date.parse(v));   // a usable timestamp from the reader
 function toZoneLocal(accId, iso) {          // UTC → [day, minutes] in the account's zone
   const ms = new Date(iso).getTime(), t = new Date(ms + zoneOffAt(zoneOf(accId), ms) * 6e4);
   return [t.toISOString().slice(0, 10), t.getUTCHours() * 60 + t.getUTCMinutes()];
@@ -1753,7 +1754,7 @@ function loadLiveTeam(accId, J, opt = {}) {
   setLobs(accId, G);
   const local = iso => toZoneLocal(accId, iso);     // shifts arrive in UTC: shown in the account (Shifts team) time zone
   const codes = {}, days = [], perDay = {}, rest = {}, imported = {}, tagged = {};
-  (J.shifts || []).forEach(s => { if (!s.start || !s.end || !stOf[s.userId]) return; const [d, m] = local(s.start), [de, me] = local(s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;   // end read on the wall clock, so a night shift across a DST change keeps its 06:00 end
+  (J.shifts || []).forEach(s => { if (!okT(s.start) || !okT(s.end) || !stOf[s.userId]) return; const [d, m] = local(s.start), [de, me] = local(s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;   // end read on the wall clock, so a night shift across a DST change keeps its 06:00 end
     ((perDay[s.userId] = perDay[s.userId] || {})[d] = perDay[s.userId][d] || []).push({ s: m, e, label: s.label, notes: s.notes, activities: readShiftActivities(accId,d,s.activities) }); });
   Object.entries(perDay).forEach(([id, byD]) => Object.entries(byD).forEach(([d, list]) => { const { main, others } = mergeDayShifts(list);
     (imported[id]=imported[id]||{})[d]={main,others};
@@ -1769,26 +1770,30 @@ function loadLiveTeam(accId, J, opt = {}) {
     const top=Object.entries(n).sort((a,b)=>b[1]-a[1])[0],cnt=Object.keys(byD).length;
     if(top)usual[id]={s:+top[0].split('-')[0],e:+top[0].split('-')[1],dows:cnt>=5?w.map(c=>c>=2):null};});
   (J.timeOff||[]).forEach(t=>{
-    if(!t.start||!t.end||!stOf[t.userId]||!(Date.parse(t.end)>Date.parse(t.start)))return;
+    if(!okT(t.start)||!okT(t.end)||!stOf[t.userId]||!(Date.parse(t.end)>Date.parse(t.start)))return;
     const [first,m]=local(t.start),[last]=local(new Date(Date.parse(t.end)-1).toISOString()),[endDay,endMin]=local(t.end),rs=reasonOf(t),from=dayMin(first,m),to=dayMin(endDay,endMin);
     /* timed leave that starts after midnight inside last night's overnight shift belongs to that shift (leave from 00:00 is a calendar-day request) */
     const pd=addD(first,-1),psh=SHIFTS[(codes[t.userId]||{})[pd]];
     if(!RCFG[rs].rest&&m>0&&psh&&psh.e>1440&&from<dayMin(pd,psh.e))leaveDays.push({id:t.userId,d:pd,rs,from,to});
-    range(first,last).forEach(d=>{days.push(d);
+    range(first,last).forEach(d=>{
+      /* a rest day on a night shift (22:00→06:00) ends before the next day's own shift: that day keeps working (2026-11-03) */
+      if(RCFG[rs].rest&&d!==first){const nx=SHIFTS[(codes[t.userId]||{})[d]];if(nx?to<=dayMin(d,nx.s):Math.min(to,dayMin(d,1440))-dayMin(d,0)<720)return;}
+      days.push(d);
       if(RCFG[rs].rest){(rest[t.userId]=rest[t.userId]||{})[d]=rs;leaveDays.push({id:t.userId,d,rs,s:d===first?m:0,e:d===endDay?endMin:1440});return;}
       if(!(codes[t.userId]||{})[d]){const u=usual[t.userId],wd=dow(d);
         if(u?u.dows?!u.dows[wd]:wd>4:wd>4)return;                     // not a normal working day for this person: stays Off
+        if(!(from<dayMin(d,u?u.e:960)&&to>dayMin(d,u?u.s:480)))return;   // leave outside the usual hours (00:00–02:00 inside last night's shift) plots no shift
         (codes[t.userId]=codes[t.userId]||{})[d]=ensureTemplate(u?u.s:480,u?u.e:960,'Shifts leave');}
       leaveDays.push({id:t.userId,d,rs,from,to});
     });
   });
-  const first = (J.from ? local(J.from)[0] : days.sort()[0]) || TODAY, last = (J.to ? local(J.to)[0] : days.sort().pop()) || addD(TODAY, 21);
+  const first = (okT(J.from) ? local(J.from)[0] : days.sort()[0]) || TODAY, last = (okT(J.to) ? local(J.to)[0] : days.sort().pop()) || addD(TODAY, 21);
   Object.entries(stOf).forEach(([id, st]) => { const m = mem.get(id) || {}, lid = lobIdFor(site, st);
     const a = { id, name: m.name || 'Shifts user ' + id.slice(0, 6), acc: accId, site, lob: lid, key: accId + '|' + lid, tl: '—', email: (m.mail || '').toLowerCase(), sup: '', station: st, shiftsGroup: st, position: m.job || '', hcStatus: 'In HC', inactive: false,
       pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], cap: { codes: { ...(codes[id] || {}) }, first, last, weekEnd: last, stop: true }, lateP: 0, absP: 0, real: true, live: true, fromShifts: true, notInShifts: false, rosterRow: null };
     AG.push(a); AGI[a.id] = a; range(first, last).forEach(d => ensurePlan(a, d, 'Captured from Shifts')); });
   Object.entries(imported).forEach(([id,byD])=>Object.entries(byD).forEach(([d,x])=>{const o=OV[kOf(id,d)]=OV[kOf(id,d)]||{};
-    o.breaks=x.main.parts.flatMap(p=>p.activities||[]);o.breaksFor=codes[id][d];o.remoteOT=x.main.ot;o.remoteExtra=x.others;
+    o.breaks=x.main.parts.flatMap(p=>p.activities||[]);o.breaksFor=codes[id][d];o.breaksSrc='Shifts';o.remoteOT=x.main.ot;o.remoteExtra=x.others;
   }));
   const applyTag=(id,d,rs,start,end)=>{const a=AGI[id];if(!a)return;const o=OV[kOf(id,d)]=OV[kOf(id,d)]||{};
     if(RCFG[rs].rest){o.restStart=start??imported[id]?.[d]?.main.s;o.restEnd=end??imported[id]?.[d]?.main.e;o.code='OFF';o.rest=rs;o.restSrc='Shifts';delete o.absence;}
@@ -1843,7 +1848,7 @@ function loadTeamRequests(accId, J) {
 function loadTeamSwaps(accId, J) {
   if (!Array.isArray(J.swaps)) return { available:false, count:0, unmatched:0, outside:0 };
   const ids = new Set(AG.filter(a => a.acc === accId).map(a => a.id)), sh = new Map((J.shifts || []).filter(x => x.id).map(x => [x.id, x]));
-  const day = id => { const x = sh.get(id); return x && x.start ? toZoneLocal(accId, x.start)[0] : ''; }, ts = v => v ? String(v).slice(0,16).replace('T',' ') : '';
+  const day = id => { const x = sh.get(id); return x && okT(x.start) ? toZoneLocal(accId, x.start)[0] : ''; }, ts = v => v ? String(v).slice(0,16).replace('T',' ') : '';
   const used = new Set(SWAPS.filter(x => !x.teams).map(x => x.id)), next = []; let unmatched = 0, outside = 0;
   const add = (q, offer) => {
     const A = AGI[q.senderUserId], B = AGI[q.recipientUserId];
@@ -1874,7 +1879,7 @@ function publishPayload(a, dates, teamId) {
    'review' = involves an absence, so a person decides */
 const SCHK = {};
 function readShiftActivities(accId,d,rows) {
-  return (rows||[]).map(x=> {const start=toZoneLocal(accId,x.startDateTime),end=toZoneLocal(accId,x.endDateTime);return [start[1]+diffD(d,start[0])*1440,end[1]+diffD(d,end[0])*1440,/lunch/i.test(x.displayName)?'lunch':/break/i.test(x.displayName)?'break':'activity',x.isPaid===true,x.displayName||'Activity',x.code||'Ac',x.theme||'blue'];});
+  return (rows||[]).filter(x=>x&&okT(x.startDateTime)&&okT(x.endDateTime)).map(x=> {const start=toZoneLocal(accId,x.startDateTime),end=toZoneLocal(accId,x.endDateTime);return [start[1]+diffD(d,start[0])*1440,end[1]+diffD(d,end[0])*1440,/lunch/i.test(x.displayName)?'lunch':/break/i.test(x.displayName)?'break':'activity',x.isPaid===true,x.displayName||'Activity',x.code||'Ac',x.theme||'blue'];}).sort((p,q)=>p[0]-q[0]||p[1]-q[1]);   // Shifts lists activities in the order they were added
 }
 
 function markPublished(id, dates, ms) { [].concat(dates).forEach(d => { const k = kOf(id, d); PUBOK[k] = Math.max(PUBOK[k] || 0, ms || Date.now()); }); }
@@ -1885,13 +1890,13 @@ function shiftsCheck(accId, J, opt = {}) {
   ppl.forEach(a => { if (a.email) byMail[a.email] = a; });
   const who = uid => (AGI[uid] && AGI[uid].acc === accId ? AGI[uid] : byMail[mail.get(uid)]) || null;
   const got = {}, unknown = new Set(), lbl = (s, e) => `${hm(s)}–${hm(e)}`;
-  (J.shifts || []).forEach(s => { if (!s.start || !s.end) return; const a = who(s.userId); if (!a) { unknown.add(s.userId); return; }
+  (J.shifts || []).forEach(s => { if (!okT(s.start) || !okT(s.end)) return; const a = who(s.userId); if (!a) { unknown.add(s.userId); return; }
     const [d, m] = local(s.start), [de, me] = local(s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;
     ((got[a.id] = got[a.id] || {})[d] = got[a.id][d] || []).push({ s: m, e, id: s.id, label: s.label || '', notes: s.notes || '', activities: Array.isArray(s.activities) ? readShiftActivities(accId,d,s.activities) : null }); });
   Object.values(got).forEach(byD => Object.keys(byD).forEach(d => { const list = byD[d]; if (list.length < 2) return; const { main, others } = mergeDayShifts(list), p = main.parts;   // Working day + OT = one span
     const acts = p.some(x => x.activities !== null) ? [...p.flatMap(x => x.activities || []), ...[]] : null;
     byD[d] = [{ s: main.s, e: main.e, id: p[0].id, ids: p.map(x => x.id), notes: p.map(x => x.notes).filter(Boolean).join(' · '), activities: acts }, ...others.map(b => b.parts[0])]; }));
-  const from = opt.from || TODAY, to = opt.to || (J.to ? local(J.to)[0] : addD(TODAY, 28));
+  const from = opt.from || TODAY, to = opt.to || (okT(J.to) ? local(J.to)[0] : addD(TODAY, 28));
   const rows = [], st = { checked: 0, match: 0, time: 0, missing: 0, extra: 0, dup: 0, activities:0, unknown: unknown.size, people: new Set(), side: { shifts: 0, tool: 0, review: 0 } };
   ppl.forEach(a => range(from, to).forEach(d => {
     const s = sched(a, d), tw = s.working && !(s.absence && fullOff(s)), sh = (got[a.id] || {})[d] || [];
@@ -1899,7 +1904,8 @@ function shiftsCheck(accId, J, opt = {}) {
     if (!tw && s.rest && (OV[kOf(a.id, d)] || {}).restSrc === 'Shifts') { st.match++; return; }   // a rest day in Shifts = the shift plus rest time off; the tool shows it off
     const type = sh.length > 1 ? 'dup' : tw && !sh.length ? 'missing' : !tw ? 'extra' : sh[0].s === s.s && sh[0].e === s.e ? (sh[0].activities !== null && JSON.stringify(activityRows(breaksOf(a,d,s.code))) !== JSON.stringify(activityRows(sh[0].activities)) ? 'activities' : 'match') : 'time';
     st[type]++; if (type === 'match') return; st.people.add(a.id);
-    const k = kOf(a.id, d), o = OV[k] || {}, edited = 'code' in o || !!o.absence || 'breaks' in o || !!o.shiftNote, pub = PUBOK[k] || 0;
+    const k = kOf(a.id, d), o = OV[k] || {}, edited = 'code' in o || !!o.absence || ('breaks' in o && o.breaksSrc !== 'Shifts') || !!o.shiftNote,   // activities copied from Shifts by the read are not a tool edit (2026-11-03: a Teams change between loads read as 'tool is newer')
+      pub = PUBOK[k] || 0;
     let side = type === 'dup' ? 'tool' : !edited ? 'shifts' : pub && pub > (o.at || 0) ? 'shifts' : 'tool';
     if (s.absence || type === 'dup') side = 'review';
     st.side[side]++;
@@ -1954,7 +1960,7 @@ function applySavedDays(rows) {
     if(!r.off || !RCFG[r.absence_reason]?.rest)delete o.rest;
     if (r.shift_note) o.shiftNote = r.shift_note; else delete o.shiftNote;
     if (tag) { if (tag.rest) { o.code = 'OFF'; o.rest = tag.rest; o.restSrc = 'Shifts'; o.restStart = tag.restStart; o.restEnd = tag.restEnd; delete o.absence; } else if (tag.absence) o.absence = tag.absence; else if (o.absence && o.absence.source === 'Shifts') delete o.absence; }
-    if (r.remark) o.remark = r.remark; if (r.breaks) { o.breaks = r.breaks; o.breaksFor = o.code || baseCode(a, r.d); } o.fromShifts = r.updated_by === 'Shifts'; o.at = o.fromShifts ? 0 : Date.parse(r.updated_at) || 0; if(o.fromShifts) PUBOK[kOf(a.id,r.d)] = Date.now(); n++; });
+    if (r.remark) o.remark = r.remark; if (r.breaks) { o.breaks = r.breaks; o.breaksFor = o.code || baseCode(a, r.d); if (r.updated_by === 'Shifts') o.breaksSrc = 'Shifts'; else delete o.breaksSrc; } o.fromShifts = r.updated_by === 'Shifts'; o.at = o.fromShifts ? 0 : Date.parse(r.updated_at) || 0; if(o.fromShifts) PUBOK[kOf(a.id,r.d)] = Date.now(); n++; });
   emit(); return n;
 }
 const chgSig = c => [c.at, c.by, c.kind, c.before, c.after, c.reason, c.remark].join('\u0001');
