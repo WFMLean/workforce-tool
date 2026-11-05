@@ -2834,7 +2834,8 @@ async function refreshScheduleReads() {
  try { for(const acc of W.LIVE.accs.filter(inScope)) await dbShiftsCheck(acc,null,true,true); }
  finally { scheduleReadBusy=false; }
 }
-setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests','swaps'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))(['requests','swaps'].includes(S.page) ? refreshTeamRequests() : refreshScheduleReads());},60000);
+/* 'live' (Who is working now + call-outs) too: time off entered in Shifts during the day shows there without a reload (2026-11-05) */
+setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests','swaps','live'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))(['requests','swaps'].includes(S.page) ? refreshTeamRequests() : refreshScheduleReads());},60000);
 
 /* OT tag beside a shift: hours of overtime that day (OT shifts from Teams, or an OT / Overtime activity) */
 const otText = m => m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ' ' + m % 60 + 'm' : ''}` : `${m}m`;
