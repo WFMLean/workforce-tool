@@ -966,6 +966,7 @@ function live() {
     else if (!loginKnown(a, d)) { st = 'nodata'; det = `Scheduled ${shiftLabel(s.code)} · no clock-in data for ${fmtS(d)} yet`; }
     else if (fullOff(s)) { st = 'leave'; det = s.absence.reason + (s.absence.remark ? ' · ' + s.absence.remark : ''); }
     else if (lim < s.s || (lim < s.s + CFG.grace && !ses.length)) { st = 'upcoming'; det = lim < s.s ? `Starts ${hm(s.s)} · in ${dur(s.s - lim)}` : `Started ${hm(s.s)} · within ${CFG.grace}-min grace`; }
+    else if (s.absence && !ses.length && !(RCFG[s.absence.reason] || {}).partial) { st = 'leave'; det = s.absence.reason + ' · part day' + (s.absence.win ? ' ' + s.absence.win.map(w => hm(w[0]) + '–' + hm(w[1])).join(', ') : ''); }   // a reason is recorded: not a no-show
     else if (lim >= s.e) { if (!ses.length) { st = 'nologin'; det = `Scheduled ${shiftLabel(s.code)} · no login recorded`; } else { st = 'done'; det = `Worked ${hm(ses[0].i)}–${hm(ses[ses.length - 1].o)}`; } }
     else if (open) { const A = adh(a, d); st = A && A.lateFlag ? 'inlate' : 'in'; det = `Logged in ${hm(ses[0].i)}` + (A && A.lateFlag ? ` · ${A.late} min late` : ''); }
     else if (!ses.length) { st = 'late'; det = `${dur(lim - s.s)} past start (${hm(s.s)}) · no login`; }
@@ -1746,15 +1747,10 @@ function toZoneLocal(accId, iso) {          // UTC → [day, minutes] in the acc
 const zoneLabel = z => (TZ_CHOICES.find(x => x[0] === z) || [z, z])[1];
 function setAccTz(accId, zone) { const before = zoneOf(accId); ACCTZ[accId] = zone; audit('Settings', 'Account time zone changed', ACC[accId] ? ACC[accId].name : accId, zoneLabel(before), zoneLabel(zone), 'Must match the Shifts team time zone'); emit(); }
 function applyAccTz(map) { Object.assign(ACCTZ, map || {}); emit(); }
-function loadLiveTeam(accId, J, opt = {}) {
-  const acc = ACC[accId]; if (!acc || !J) return null;
-  dropAgents(accId, true); const site = opt.site || LOCNAME[acc.site] || 'Barranquilla';
-  const groups = (J.groups || []).filter(g => g.active && (g.userIds || []).length), mem = new Map((J.members || []).map(m => [m.id, m]));
-  const stOf = {}; groups.forEach(g => g.userIds.forEach(id => { if (!stOf[id]) stOf[id] = cleanSt(g.name) || 'Unassigned'; }));
-  const G = {}; Object.entries(stOf).forEach(([id, st]) => { const lid = lobIdFor(site, st); G[lid] = G[lid] || { hc: 0, site, station: st }; G[lid].hc++; });
-  setLobs(accId, G);
+/* Shifts shifts per person-day: the merged main shift (codes), its parts (imported) and rest days named by the shift label (tagged) */
+function readTeamShifts(accId, J, stOf) {
   const local = iso => toZoneLocal(accId, iso);     // shifts arrive in UTC: shown in the account (Shifts team) time zone
-  const codes = {}, days = [], perDay = {}, rest = {}, imported = {}, tagged = {};
+  const codes = {}, days = [], perDay = {}, imported = {}, tagged = {};
   (J.shifts || []).forEach(s => { if (!okT(s.start) || !okT(s.end) || !stOf[s.userId]) return; const [d, m] = local(s.start), [de, me] = local(s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;   // end read on the wall clock, so a night shift across a DST change keeps its 06:00 end
     ((perDay[s.userId] = perDay[s.userId] || {})[d] = perDay[s.userId][d] || []).push({ s: m, e, label: s.label, notes: s.notes, activities: readShiftActivities(accId,d,s.activities) }); });
   Object.entries(perDay).forEach(([id, byD]) => Object.entries(byD).forEach(([d, list]) => { const { main, others } = mergeDayShifts(list);
@@ -1762,9 +1758,15 @@ function loadLiveTeam(accId, J, opt = {}) {
     const rs=tsName(main.parts.map(p=>p.label).find(n=>RCFG[tsName(n)])||'');
     if(RCFG[rs]) (tagged[id]=tagged[id]||{})[d]=rs;
     (codes[id] = codes[id] || {})[d] = ensureTemplate(main.s, main.e, 'Shifts'); days.push(d); }));
+  return { codes, days, imported, tagged };
+}
+/* Shifts time off → per person-day tags ({rest, restStart, restEnd} and/or {absence}), shared by the full load and the 60 s check.
+   Leave on a day with no shift adds the usual shift to R.codes / R.days. */
+function readTeamLeave(accId, J, stOf, R) {
+  const { codes, days, imported, tagged } = R, local = iso => toZoneLocal(accId, iso), tags = {};
   const reasons=new Map((J.reasons||[]).map(r=>[r.id,r.name]));
   const reasonOf=t=>{const nm=reasons.get(t.reasonId)||t.reasonName||'Personal time-off',rs=tsName(nm);return RCFG[rs]?rs:TS_UNAPPROVED[nm]||'Personal time-off';};
-  const leaveDays=[],dayMin=(d,m)=>Date.UTC(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10))/6e4+m;
+  const leaveDays=[],rest={},dayMin=(d,m)=>Date.UTC(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10))/6e4+m;
   /* Leave on a day with no shift: plot the person's usual shift only on a weekday they normally work (never a 24 h shift). */
   const usual={};Object.entries(imported).forEach(([id,byD])=>{const n={},w=[0,0,0,0,0,0,0];
     Object.entries(byD).forEach(([d,x])=>{const k=x.main.s+'-'+x.main.e;n[k]=(n[k]||0)+1;w[dow(d)]++;});
@@ -1788,6 +1790,32 @@ function loadLiveTeam(accId, J, opt = {}) {
       leaveDays.push({id:t.userId,d,rs,from,to});
     });
   });
+  const applyTag=(id,d,rs,start,end)=>{if(!stOf[id])return;const o=tags[kOf(id,d)]=tags[kOf(id,d)]||{};
+    if(RCFG[rs].rest){o.restStart=start??imported[id]?.[d]?.main.s;o.restEnd=end??imported[id]?.[d]?.main.e;o.rest=rs;delete o.absence;}
+    else o.absence={reason:rs,remark:'From Shifts',source:'Shifts',by:'Shifts',at:''};
+  };
+  /* Leave counts only for the part of the shift it covers: none = ignored, most of it = whole day, otherwise part-day minutes. */
+  const applyLeave=t=>{if(t.from==null)return applyTag(t.id,t.d,t.rs,t.s,t.e);
+    const sh=SHIFTS[(codes[t.id]||{})[t.d]];if(!sh)return;
+    if(t.from<=dayMin(t.d,0)&&t.to>=dayMin(t.d,1440))return applyTag(t.id,t.d,t.rs);   // the whole calendar day off = that day's shift off, also for a night shift ending tomorrow
+    const s0=dayMin(t.d,sh.s),e0=dayMin(t.d,sh.e),len=e0-s0,cov=Math.max(0,Math.min(e0,t.to)-Math.max(s0,t.from));
+    if(cov<=0)return;const o=tags[kOf(t.id,t.d)]=tags[kOf(t.id,t.d)]||{},prev=o.absence&&o.absence.source==='Shifts'&&o.absence.reason===t.rs?o.absence.mins:null;
+    if(prev===undefined)return;                                          // already a whole day
+    const prevWin=prev?o.absence.win||[]:[],w0=Math.max(s0,t.from)-s0+sh.s,w1=Math.min(e0,t.to)-s0+sh.s;   // the leave window in shift minutes
+    const mins=Math.min(len,(prev||0)+cov);applyTag(t.id,t.d,t.rs);if(mins<len-15&&!RCFG[t.rs].partial){o.absence.mins=mins;o.absence.win=[...prevWin,[w0,w1]];}};
+  Object.entries(tagged).forEach(([id,byD])=>Object.entries(byD).forEach(([d,rs])=>applyTag(id,d,rs)));
+  leaveDays.forEach(applyLeave);
+  return tags;
+}
+function loadLiveTeam(accId, J, opt = {}) {
+  const acc = ACC[accId]; if (!acc || !J) return null;
+  dropAgents(accId, true); const site = opt.site || LOCNAME[acc.site] || 'Barranquilla';
+  const groups = (J.groups || []).filter(g => g.active && (g.userIds || []).length), mem = new Map((J.members || []).map(m => [m.id, m]));
+  const stOf = {}; groups.forEach(g => g.userIds.forEach(id => { if (!stOf[id]) stOf[id] = cleanSt(g.name) || 'Unassigned'; }));
+  const G = {}; Object.entries(stOf).forEach(([id, st]) => { const lid = lobIdFor(site, st); G[lid] = G[lid] || { hc: 0, site, station: st }; G[lid].hc++; });
+  setLobs(accId, G);
+  const local = iso => toZoneLocal(accId, iso);     // shifts arrive in UTC: shown in the account (Shifts team) time zone
+  const { codes, days, imported, tagged } = readTeamShifts(accId, J, stOf), tags = readTeamLeave(accId, J, stOf, { codes, days, imported, tagged });
   const first = (okT(J.from) ? local(J.from)[0] : days.sort()[0]) || TODAY, last = (okT(J.to) ? local(J.to)[0] : days.sort().pop()) || addD(TODAY, 21);
   Object.entries(stOf).forEach(([id, st]) => { const m = mem.get(id) || {}, lid = lobIdFor(site, st);
     const a = { id, name: m.name || 'Shifts user ' + id.slice(0, 6), acc: accId, site, lob: lid, key: accId + '|' + lid, tl: '—', email: (m.mail || '').toLowerCase(), sup: '', station: st, shiftsGroup: st, position: m.job || '', hcStatus: 'In HC', inactive: false,
@@ -1796,25 +1824,28 @@ function loadLiveTeam(accId, J, opt = {}) {
   Object.entries(imported).forEach(([id,byD])=>Object.entries(byD).forEach(([d,x])=>{const o=OV[kOf(id,d)]=OV[kOf(id,d)]||{};
     o.breaks=x.main.parts.flatMap(p=>p.activities||[]);o.breaksFor=codes[id][d];o.breaksSrc='Shifts';o.remoteOT=x.main.ot;o.remoteExtra=x.others;
   }));
-  const applyTag=(id,d,rs,start,end)=>{const a=AGI[id];if(!a)return;const o=OV[kOf(id,d)]=OV[kOf(id,d)]||{};
-    if(RCFG[rs].rest){o.restStart=start??imported[id]?.[d]?.main.s;o.restEnd=end??imported[id]?.[d]?.main.e;o.code='OFF';o.rest=rs;o.restSrc='Shifts';delete o.absence;}
-    else o.absence={reason:rs,remark:'From Shifts',source:'Shifts',by:'Shifts',at:''};
-  };
-  /* Leave counts only for the part of the shift it covers: none = ignored, most of it = whole day, otherwise part-day minutes. */
-  const applyLeave=t=>{if(t.from==null)return applyTag(t.id,t.d,t.rs,t.s,t.e);
-    const sh=SHIFTS[(codes[t.id]||{})[t.d]];if(!sh)return;
-    if(t.from<=dayMin(t.d,0)&&t.to>=dayMin(t.d,1440))return applyTag(t.id,t.d,t.rs);   // the whole calendar day off = that day's shift off, also for a night shift ending tomorrow
-    const s0=dayMin(t.d,sh.s),e0=dayMin(t.d,sh.e),len=e0-s0,cov=Math.max(0,Math.min(e0,t.to)-Math.max(s0,t.from));
-    if(cov<=0)return;const o=OV[kOf(t.id,t.d)]=OV[kOf(t.id,t.d)]||{},prev=o.absence&&o.absence.source==='Shifts'&&o.absence.reason===t.rs?o.absence.mins:null;
-    if(prev===undefined)return;                                          // already a whole day
-    const prevWin=prev?o.absence.win||[]:[],w0=Math.max(s0,t.from)-s0+sh.s,w1=Math.min(e0,t.to)-s0+sh.s;   // the leave window in shift minutes
-    const mins=Math.min(len,(prev||0)+cov);applyTag(t.id,t.d,t.rs);if(mins<len-15&&!RCFG[t.rs].partial){o.absence.mins=mins;o.absence.win=[...prevWin,[w0,w1]];}};
-  Object.entries(tagged).forEach(([id,byD])=>Object.entries(byD).forEach(([d,rs])=>applyTag(id,d,rs)));
-  leaveDays.forEach(applyLeave);
+  Object.entries(tags).forEach(([k,t])=>{if(!t.rest&&!t.absence)return;const o=OV[k]=OV[k]||{};
+    if(t.rest){o.restStart=t.restStart;o.restEnd=t.restEnd;o.code='OFF';o.rest=t.rest;o.restSrc='Shifts';delete o.absence;}
+    if(t.absence)o.absence=t.absence;});
   if (!LIVE.accs.includes(accId)) LIVE.accs.push(accId);
   LIVE.teams = LIVE.teams || {}; LIVE.teams[accId] = { site, people: Object.keys(stOf).length, shifts: (J.shifts || []).length, stations: groups.map(g => g.name), at: stamp() };
   if(ROSTERS[accId])enrichFromRoster(accId);
   emit(); return LIVE.teams[accId];
+}
+/* the 60 s check: time off added or changed in Shifts since the last full load shows without a reload (2026-11-05: call-outs said "no tag"
+   and November ABS read 0.6% for time off entered during the day). Only days the tool shows working, not rest days, not decided by a person
+   (a tool edit or a tool absence). Removing cancelled time off is left to the full load: the check read is yesterday onward and the reader
+   may leave out time off that started before it. Nothing is sent to Shifts. */
+function syncShiftsLeave(accId, J, from, to) {
+  const stOf = {}; (J.groups || []).filter(g => g.active && (g.userIds || []).length).forEach(g => g.userIds.forEach(id => { if (!stOf[id]) stOf[id] = cleanSt(g.name) || 'Unassigned'; }));
+  const R = readTeamShifts(accId, J, stOf), tags = readTeamLeave(accId, J, stOf, R), out = [], sig = x => x ? [x.reason, x.mins || '', JSON.stringify(x.win || '')].join('|') : '';
+  AG.filter(a => a.acc === accId && a.live && !a.inactive && stOf[a.id]).forEach(a => range(from, to).forEach(d => {
+    const k = kOf(a.id, d), o = OV[k] || {}, t = tags[k], want = t && !t.rest ? t.absence : null, cur = o.absence || null;
+    if (!want || o.rest || (cur && cur.source !== 'Shifts') || (o.at > 0 && !o.fromShifts) || sig(cur) === sig(want) || !sched(a, d).working) return;
+    (OV[k] = OV[k] || {}).absence = want; out.push({ a, d, from: cur ? cur.reason : '', to: want.reason });
+  }));
+  if (out.length) emit();
+  return out;
 }
 /* Teams request state is authoritative; refreshing must not enqueue a decision. */
 function loadTeamRequests(accId, J) {
@@ -2270,7 +2301,7 @@ global.WF = {
   // utils
   pad, iso, parse, addD, diffD, dow, range, weekStart, hm, esc, fmtD, fmtS, DOW, pct, fmtPct, dur, initials, TODAY, hashKey,
   // data
-  kOf, loadTeamSwaps, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
+  kOf, loadTeamSwaps, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, syncShiftsLeave, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
   // logic
   get clock() { return WFc.clock; }, set clock(v) { WFc.clock = v; if (WFc.day === TODAY && Math.abs(v - realMin()) > 2) WFc.live = false; emit(); }, realMin,
   get floor() { return { day: WFc.day, clock: WFc.clock, live: WFc.live, zone: WFc.zone }; }, setFloor, lastClockDay,
@@ -2604,7 +2635,7 @@ function floorDay() {
     const A = present ? W.adh(a, D) : null, started = c >= s.s + W.CFG.grace, ended = c >= s.e, partLate = ab && !full && /late/i.test(ab.reason);
     const arr = W.arrivalOf(a, D), last = ses[ses.length - 1], outMid = present && last && !last.open && c >= s.s && c < s.e && c - last.o > W.CFG.grace;
     const cat = full ? (present ? 'conflict' : 'absent') : outMid ? 'out' : present ? ((A && A.lateFlag) || partLate ? 'late' : 'present')
-      : arr && arr.arr != null ? 'arrived' : arr && arr.eta != null ? (c < arr.eta ? 'expected' : 'overdue') : !known ? 'nodata' : started ? 'noshow' : 'pending';
+      : arr && arr.arr != null ? 'arrived' : arr && arr.eta != null ? (c < arr.eta ? 'expected' : 'overdue') : ab ? (partLate ? 'late' : 'absent') : !known ? 'nodata' : started ? 'noshow' : 'pending';   // a recorded reason (part-day leave too) is never "no tag"
     const timing = c < s.s ? 'later' : ended ? 'ended' : 'current';
     out.push({ a, d:D, localClock:c, s, ab, full, ses, present, A, arr, cat, timing, type:ab ? (W.RTYPE[ab.reason] || 'unplanned') : '' }); });
   return out;
@@ -4173,13 +4204,20 @@ async function dbReadChanges(acc,since){
   if(r.truncated)throw Error('more than 60,000 change records in 60 days');DB.histWarn=DB.histWarn||{};delete DB.histWarn[acc];return r;}
  catch(e){DB.histWarn=DB.histWarn||{};DB.histWarn[acc]=e.message;return {data:[],error:null,failed:true,why:e.message};}
 }
+/* clock-ins one week at a time on the (account_id, d) index. One 62-day read ordered by person took ~55 s for Crane (15,300 rows, 16 offset
+   pages) and a page past the database statement timeout failed the whole account load (2026-11-05). A week that fails is left out (those days
+   show "no login data", never no-shows); the account still loads. */
+async function dbReadClockins(acc){const out=[];let why='';
+ for(let d=W.addD(TODAY,-62);d<=TODAY;d=W.addD(d,7)){const e=W.addD(d,7);
+  try{const r=await dbReadAll(()=>DB.sb.from('wft_clockins').select('person_id,d,sessions').eq('account_id',acc).gte('d',d).lt('d',e).order('d').order('person_id'));out.push(...r.data);}catch(x){why=x.message+' (week of '+d+')';}}
+ DB.clockWarn=DB.clockWarn||{};if(why)DB.clockWarn[acc]=why;else delete DB.clockWarn[acc];return {data:out,error:null};}
 async function dbRestoreTeam(acc,J,P){
  W.loadLiveTeam(acc,J,{site:(P.site||{})[acc]||W.LOCNAME[W.ACC[acc].site]||'Barranquilla'});
  const since=W.addD(TODAY,-60);
  const [sd,pj,ck,ar,changes]=await Promise.all([
  dbReadAll(()=>DB.sb.from('wft_schedule').select('*').eq('account_id',acc).gte('d',since).order('person_id').order('d')),
  dbReadAll(()=>DB.sb.from('wft_sync_jobs').select('person_id,dates,at').eq('account_id',acc).eq('status','Confirmed').gte('at',new Date(Date.now()-60*864e5).toISOString()).order('id')),
- dbReadAll(()=>DB.sb.from('wft_clockins').select('person_id,d,sessions').eq('account_id',acc).gte('d',W.addD(TODAY,-62)).order('person_id').order('d')),
+ dbReadClockins(acc),
  dbReadAll(()=>DB.sb.from('wft_arrivals').select('*').eq('account_id',acc).gte('d',W.addD(TODAY,-2)).order('person_id').order('d')),
  dbReadChanges(acc,since)]);
  W.applySavedDays(sd.data);W.applySavedChanges(changes.data);pj.data.forEach(x=>W.markPublished(x.person_id,x.dates||[],Date.parse(x.at)));W.applyClockins(ck.data);W.applySavedArrivals(ar.data);
@@ -4196,7 +4234,7 @@ async function dbFillHistory(acc,J,P){
  }catch(e){DB.teams[acc]={...DB.teams[acc],hist:'failed',histWhy:e.message};}
  render();
 }
-const histNotice=()=>{const hw=Object.entries(DB.histWarn||{}).filter(([a])=>S.acc==='all'||S.acc===a).map(([a,w])=>`<p class="note warn"><b>${esc(W.ACC[a].name)}:</b> schedule change history could not be loaded (${esc(w)}). Schedules and reports are shown; the saved original schedule and the Schedule changes history are hidden until the database clean-up.</p>`).join('');const l=Object.entries(DB.teams||{}).filter(([a,x])=>x.hist&&x.hist!=='ok'&&(S.acc==='all'||S.acc===a));return hw+(l.length?`<p class="note">${l.map(([a,x])=>esc(W.ACC[a].name)+(x.hist==='failed'?' older weeks failed to load ('+esc(x.histWhy||'')+')':' older weeks still loading from Teams')).join(' · ')}. The last 2 weeks and the next 5 are complete; weeks before that fill in automatically.</p>`:'');};
+const histNotice=()=>{const cw=Object.entries(DB.clockWarn||{}).filter(([a])=>S.acc==='all'||S.acc===a).map(([a,w])=>`<p class="note warn"><b>${esc(W.ACC[a].name)}:</b> some clock-ins could not be loaded (${esc(w)}). Those days show no login data, not no-shows.</p>`).join('');const hw=cw+Object.entries(DB.histWarn||{}).filter(([a])=>S.acc==='all'||S.acc===a).map(([a,w])=>`<p class="note warn"><b>${esc(W.ACC[a].name)}:</b> schedule change history could not be loaded (${esc(w)}). Schedules and reports are shown; the saved original schedule and the Schedule changes history are hidden until the database clean-up.</p>`).join('');const l=Object.entries(DB.teams||{}).filter(([a,x])=>x.hist&&x.hist!=='ok'&&(S.acc==='all'||S.acc===a));return hw+(l.length?`<p class="note">${l.map(([a,x])=>esc(W.ACC[a].name)+(x.hist==='failed'?' older weeks failed to load ('+esc(x.histWhy||'')+')':' older weeks still loading from Teams')).join(' · ')}. The last 2 weeks and the next 5 are complete; weeks before that fill in automatically.</p>`:'');};
 async function dbLoadTeams(p) {
  if(!CONN.readUrl)return;const P=CONN.pilot||{},accs=readAccs().filter(x=>p.scope.includes('all')||p.scope.includes(x));if(!accs.length)return;
  DB.teams=DB.teams||{};accs.forEach(acc=>DB.teams[acc]={st:'loading',at:Date.now(),loaded:false});render();
@@ -4322,10 +4360,13 @@ async function dbShiftsCheck(accId, J, auto = true, bg = false) {
      last 2 weeks and only days this read covered fresh (J.freshFrom = first fresh read instant, not snapshot history; a day counts once it starts inside the read). Nothing is sent. */
   if (auto && J.freshFrom) { const [fd, fm] = W.toZoneLocal(accId, J.freshFrom), pf = [W.addD(TODAY, -14), fm ? W.addD(fd, 1) : fd].sort()[1], pt = W.addD(TODAY, -1);
     if (pf <= pt) take(W.shiftsCheck(accId, J, { site, from:pf, to:pt, keep:true }).rows); }
+  let leave = [];
+  if (auto && J.freshFrom) { const [fd, fm] = W.toZoneLocal(accId, J.freshFrom); leave = W.syncShiftsLeave(accId, J, fm ? W.addD(fd, 1) : fd, opt.to); }   // time off entered in Shifts since the full load
   let c = W.shiftsCheck(accId, J, opt);
   if (auto) { const n = took.length; take(c.rows); if (took.length > n) c = W.shiftsCheck(accId, J, opt); }
   DB.chk = DB.chk || {}; DB.chk[accId] = { at:new Date().toLocaleTimeString(), took:(took.length ? took : (DB.chk[accId] || {}).took || []), tookAt:took.length ? new Date().toLocaleTimeString() : (DB.chk[accId] || {}).tookAt };
   if (took.length) W.audit('Shifts sync', 'Took changes made in Shifts', W.ACC[accId].name, '', `${took.length} person-day${took.length === 1 ? '' : 's'}`, 'Two-way Shifts check');
+  if (leave.length) W.audit('Shifts sync', 'Took time off from Shifts', W.ACC[accId].name, '', `${leave.length} person-day${leave.length === 1 ? '' : 's'}`, leave.slice(0, 5).map(x => `${x.a.name} ${x.d} ${x.to}`).join(' · '));
   render();
 }
 async function dbLoadAudit() {
