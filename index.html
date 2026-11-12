@@ -1366,6 +1366,9 @@ function activityUtilization(code, rows, target=75) {
 }
 const paidMin=(a,d,code)=>activityPaidMin(code,breaksOf(a,d,code));
 function shiftSignature(x) { const act=(x.activities||[]).map(a=>[a.displayName||'',a.code||'',new Date(a.startDateTime).toISOString(),new Date(a.endDateTime).toISOString(),a.isPaid,a.theme||'']).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));return JSON.stringify([new Date(x.startDateTime||x.start).toISOString(),new Date(x.endDateTime||x.end).toISOString(),x.displayName??x.label??'',x.notes||'',act]); }
+/* what a person works: times + each activity's times and paid flag. Label, notes and colour are left out: Crane's shifts carry ops' own label
+   and notes ("Holiday Working Day", "01:00 PM - 11:00 PM"), so a day only counts as changed when the work changes (publish v4, 2026-11-13) */
+function shiftCoreSignature(x) { const t=v=>new Date(v).toISOString(),act=(x.activities||[]).map(a=>[t(a.startDateTime),t(a.endDateTime),a.isPaid===true]).sort((p,q)=>JSON.stringify(p).localeCompare(JSON.stringify(q)));return JSON.stringify([t(x.startDateTime||x.start),t(x.endDateTime||x.end),act]); }
 /* ---------- schedule builder: publish a batch of draft cells (one audit + one Shifts job per person) ---------- */
 function publishDraft(changes, note, reason, remark, shiftNote) {        // changes: [{id, d, code}] · reason/remark go on every shift change · shiftNote = note shown on those shifts in Shifts
   changes.forEach(c=>{const a=AGI[c.id];if(a){const code=c.code??sched(a,c.d).code;try{validateActivities(code==='OFF'?[]:(c.breaks??breaksOf(a,c.d,code)),code);}catch(e){throw Error(a.name+' · '+c.d+': '+e.message);}}});
@@ -2309,7 +2312,7 @@ global.WF = {
   // utils
   pad, iso, parse, addD, diffD, dow, range, weekStart, hm, esc, fmtD, fmtS, DOW, pct, fmtPct, dur, initials, TODAY, hashKey,
   // data
-  kOf, loadTeamSwaps, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, syncShiftsLeave, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
+  kOf, loadTeamSwaps, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, shiftCoreSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, syncShiftsLeave, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
   // logic
   get clock() { return WFc.clock; }, set clock(v) { WFc.clock = v; if (WFc.day === TODAY && Math.abs(v - realMin()) > 2) WFc.live = false; emit(); }, realMin,
   get floor() { return { day: WFc.day, clock: WFc.clock, live: WFc.live, zone: WFc.zone }; }, setFloor, lastClockDay,
@@ -4175,7 +4178,7 @@ async function dbPublishJob(j, a) {
   j.status = 'Sending'; render(); const t = W.teamFor(a), teamId = (t && t.teamId) || W.ACC[a.acc].teamId, out = [], sleep = s => new Promise(r => setTimeout(r, s * 1000));
   /* 2026-11-13 (publish v4): the flow can only delete + create (the Shifts connector has no "update a shift"), and every recreated shift gets
      a new ID, which breaks pending swap/offer requests. So each run is previewed first and days that already match Shifts (times, label,
-     notes, activities; shared, no pending draft) are left alone: their shift IDs stay. Only changed days are sent. Preview fails → send all. */
+     activity times and paid flags; shared, no pending draft; label and notes ignored) are left alone: their shift IDs stay. Only changed days are sent. Preview fails → send all. */
   const runs = [];
   for (const run0 of W.dayRuns(j.dates)) {
     const ch = await pubChangedDays(a, run0, teamId), same = ch ? run0.filter(d => !ch.includes(d)) : [];
@@ -4213,9 +4216,9 @@ async function pubChangedDays(a, run, teamId) {
   const day = iso => W.toZoneLocal(a.acc, iso)[0], have = {}, want = {};
   try {
     (r.b.existingShifts || []).forEach(s => { const sh = s.sharedShift, dr = s.draftShift, x = sh || dr || {};
-      const sig = sh && !(dr && W.shiftSignature(dr) !== W.shiftSignature(sh)) ? W.shiftSignature(sh) : 'draft';   // unshared edits → send ours
+      const sig = sh && !(dr && W.shiftCoreSignature(dr) !== W.shiftCoreSignature(sh)) ? W.shiftCoreSignature(sh) : 'draft';   // unshared edits → send ours
       (have[day(x.startDateTime)] = have[day(x.startDateTime)] || []).push(sig); });
-    (payload.shifts || []).forEach(x => (want[day(x.start)] = want[day(x.start)] || []).push(W.shiftSignature(x)));
+    (payload.shifts || []).forEach(x => (want[day(x.start)] = want[day(x.start)] || []).push(W.shiftCoreSignature(x)));
   } catch (e) { return null; }
   return run.filter(d => JSON.stringify((have[d] || []).sort()) !== JSON.stringify((want[d] || []).sort()));
 }
