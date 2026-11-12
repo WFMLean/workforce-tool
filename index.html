@@ -1885,11 +1885,14 @@ function loadTeamSwaps(accId, J) {
   const add = (q, offer) => {
     const A = AGI[q.senderUserId], B = AGI[q.recipientUserId];
     if (!q.id || !A || !B || A.acc !== accId || B.acc !== accId) { unmatched++; return; }
-    const da = day(q.senderShiftId), db = offer ? da : day(q.recipientShiftId);
-    if (!da || !db) { outside++; return; }
+    let da = day(q.senderShiftId), db = offer ? da : day(q.recipientShiftId), missing = '';
+    /* 2026-11-12: a pending request whose shift is gone (the publish flow deletes and recreates shifts, so the ID changed) is still shown,
+       on the day of the shift that is left, flagged: Teams can't approve it. Decided requests lose their IDs by design and stay counted. */
+    if (!da || !db) { if (q.state !== 'pending' || (!da && !db)) { outside++; return; } missing = !da ? 'sender' : 'recipient'; da = db = da || db; }
     let id = 'TS-' + String(q.id).replace(/[^A-Za-z0-9]/g, '').slice(-6); while (used.has(id)) id += '·'; used.add(id);
     const status = q.state === 'approved' ? 'Approved' : q.state === 'declined' ? 'Declined' : q.state === 'pending' ? (q.assignedTo === 'recipient' ? 'Waiting for coworker' : 'Pending approval') : 'Unknown';
-    next.push({ id, shiftsId:q.id, teams:true, type:offer ? 'offer' : da === db ? 'same' : 'days', a:A.id, b:B.id, da, db, note:q.senderMessage || '', coworkerNote:q.recipientActionMessage || '',
+    const hold = q.state !== 'pending' ? [] : [missing !== 'sender' && [A.id, da], !offer && missing !== 'recipient' && [B.id, db]].filter(Boolean);   // days the publish flow must not touch
+    next.push({ id, shiftsId:q.id, teams:true, type:missing ? 'missing' : offer ? 'offer' : da === db ? 'same' : 'days', missing, hold, senderShiftId:q.senderShiftId || '', recipientShiftId:q.recipientShiftId || '', a:A.id, b:B.id, da, db, note:q.senderMessage || '', coworkerNote:q.recipientActionMessage || '',
       received:ts(q.senderDateTime || q.createdDateTime), status, source:'Teams Shifts', decidedBy:(AGI[q.managerUserId] || {}).name || (q.managerUserId ? 'Manager in Teams' : ''),
       decidedAt:ts(q.managerActionDateTime), decisionNote:q.managerActionMessage || '' });
   };
@@ -2028,6 +2031,7 @@ const SWAP_RULES = { minRest: 10, maxPerMonth: 4, noticeHours: 24, crossLob: 'wa
 const SWAPS = []; let swn = 300;
 const shHours = c => { if (!c || c === 'OFF') return []; const x = SHIFTS[c], o = []; for (let h = 0; h < 24; h++) { const m = h * 60 + 30; if (m >= x.s && m < Math.min(x.e, 1440)) o.push(h); } return o; };
 function swapMap(sw) {
+  if (sw.missing) return {};
   const A = AGI[sw.a], B = AGI[sw.b], m = {}, ca = sched(A, sw.da).code;
   if (sw.type === 'offer') { m[A.id + '|' + sw.da] = 'OFF'; m[B.id + '|' + sw.da] = ca; }
   else if (sw.type === 'same') { m[A.id + '|' + sw.da] = sched(B, sw.da).code; m[B.id + '|' + sw.da] = ca; }
@@ -2035,7 +2039,11 @@ function swapMap(sw) {
   return m;
 }
 const swapDates = sw => [...new Set([sw.da, sw.db].filter(Boolean))].sort();
+/* days with a pending Teams swap/offer: publishing replaces shifts (new IDs), which breaks the request, so these days are held back */
+const swapHolds = (id, dates) => { const ds = new Set([].concat(dates)); return SWAPS.filter(x => x.teams && ['Pending approval', 'Waiting for coworker'].includes(x.status)).flatMap(x => (x.hold || []).filter(([p, d]) => p === id && ds.has(d)).map(([, d]) => ({ d, swap:x.id, with:(AGI[id === x.a ? x.b : x.a] || {}).name || '' }))); };
 function swapCheck(sw) {
+  if (sw.missing) { const A = AGI[sw.a], B = AGI[sw.b], who = sw.missing === 'sender' ? A : B;
+    return { checks:[{ lvl:'fail', t:`${who.name.split(' ')[0]}'s shift in this request no longer exists in Shifts (it was changed or republished after the request). Teams can't approve it: decline it in Teams and ask ${A.name.split(' ')[0]} to request the swap again.`, cat:'' }], result:'fail', covs:[], map:{} }; }
   const A = AGI[sw.a], B = AGI[sw.b], m = sw.status === 'Approved' ? {} : swapMap(sw), R = SWAP_RULES, out = [];
   const codeAt = (ag, d) => m[ag.id + '|' + d] ?? sched(ag, d).code;
   const add = (lvl, t, cat) => out.push({ lvl, t, cat: cat || '' });
@@ -2307,7 +2315,7 @@ global.WF = {
   get floor() { return { day: WFc.day, clock: WFc.clock, live: WFc.live, zone: WFc.zone }; }, setFloor, lastClockDay,
   sched, baseCode, patOn, shiftLabel, shiftShort, ensureTemplate, patternFromAgent, allocation, setAlloc, login, createUser, setUser, resetPw,
   LOCNAME, LOCF, locOf, setLoc: v => { LOCF.v = v; emit(); }, breakPlan, postBreaks, publishDraft, defaultBreaks, breaksOf, paidMin, ARCHIVE, removeAccount, restoreAccount, inactiveFlags, setInactive, clearInactiveShifts, ROSTERS, importRoster, enrichFromRoster, loginKnown, importLogins, importTimesheet, isProjected, rollPreview, runRoll, setPub, tShort, swapVerdict, processSwap, acceptSwap,
-  swapMap, swapCheck, decideSwap, setSwapRule, swapDates,
+  swapMap, swapCheck, decideSwap, setSwapRule, swapDates, swapHolds,
   rcode, fullOff, otMinutes, otIntervals, otStats, setReason, savePatternTimes, scheduleAudit, whatIf, addAccount,
   diffAgainst, teamsDiff, applyDiff, outList, sendNotify, logins, adh, lateComparison, live, cov, reqCoverage, worst, verdict, absStats, adhStats,
   approve, deny, editCell, assignPattern, publishAll, retry, setCfg, savePattern, audit, absPatterns, buildFacts, setArrival, applySavedArrivals, arrivalOf, onArrival: f => ARR_HOOKS.push(f), isLate, lateRuleText, applyRules, saveTemplate, applySavedTemplates, onTemplate: f => TEMPLATE_HOOKS.push(f),
@@ -3765,7 +3773,7 @@ function patternsDrawer() {
     `<button class="btn" data-a="close">Close</button><button class="btn pri" data-a="savePat">Save pattern</button>`);
 }
 /* ---------- SHIFT SWAPS ---------- */
-const SWT = { same:'Same-day swap', days:'Day swap', offer:'Shift offered' };
+const SWT = { same:'Same-day swap', days:'Day swap', offer:'Shift offered', missing:'Swap · shift no longer in Shifts' };
 const chk = { pass:['✓','ok'], warn:['!','warn'], fail:['✕','bad'] };
 const swOk = sw => accOk(W.AGI[sw.a]) || accOk(W.AGI[sw.b]);
 function pSwaps() {
@@ -3775,7 +3783,7 @@ function pSwaps() {
   if (!list.some(x => x.id === S.swSel)) S.swSel = list[0] ? list[0].id : null;
   const sw = W.SWAPS.find(x => x.id === S.swSel), passing = W.SWAPS.filter(x => swOk(x) && !x.teams && x.status === 'Pending approval' && W.swapCheck(x).result === 'pass');
   const swErr = Object.entries(DB.swaps || {}).filter(([acc, x]) => x.err && (S.acc === 'all' || S.acc === acc)), swOut = Object.values(DB.swaps || {}).reduce((n, x) => n + (x.outside || 0), 0);
-  const swNote = (swErr.length ? `<p class="note warn">Swap requests not read for ${swErr.map(([acc, x]) => esc(W.ACC[acc].name) + ' (' + esc(x.err) + ')').join(', ')}.</p>` : '') + (swOut ? `<p class="note">${swOut} older Teams request${swOut === 1 ? '' : 's'} not shown: their shifts are outside the loaded weeks.</p>` : '');
+  const swNote = (swErr.length ? `<p class="note warn">Swap requests not read for ${swErr.map(([acc, x]) => esc(W.ACC[acc].name) + ' (' + esc(x.err) + ')').join(', ')}.</p>` : '') + (swOut ? `<p class="note">${swOut} Teams request${swOut === 1 ? '' : 's'} not shown: decided or old requests whose shifts are no longer in Shifts (approving a swap gives both shifts new IDs) or are outside the loaded weeks.</p>` : '');
   return swNote + `<div class="head"><div class="grow"><div class="kicker">From Microsoft Teams Shifts · agent requests → coworker accepts → decided in Teams</div><h1>Shift <b>swaps</b></h1><p class="sub">${W.SWAP_RULES.auto ? 'Auto-approval is <b>on</b>. When the coworker accepts in Teams, the swap is approved if coverage holds and every rule passes. If coverage isn\'t enough it is declined, even though both agents agreed. Only exceptions come here for review.' : 'Auto-approval is <b>off</b>. Every accepted swap waits here for an RTA.'}</p></div>
     <div class="seg">${tabs.map(([k, l]) => `<button class="${S.swTab === k ? 'on' : ''}" data-a="swTab" data-v="${k}">${l} <span class="num" style="opacity:.6">${W.SWAPS.filter(x => swOk(x) && (k === 'Decided' ? ['Approved','Declined'].includes(x.status) : x.status === k)).length}</span></button>`).join('')}</div>
     ${S.swTab === 'Pending approval' && !W.SWAP_RULES.auto ? `<button class="btn pri" data-a="swBulk" ${passing.length ? '' : 'disabled'}>Approve all that pass every rule (${passing.length})</button>` : ''}</div>
@@ -4157,6 +4165,12 @@ async function dbTimeOffJob(j, a) {
   if (error) console.warn('sync job log', error.message);
 }
 async function dbPublishJob(j, a) {
+  const held = W.swapHolds(a.id, j.dates);   // publishing replaces the shift (new ID) and would break a pending Teams swap/offer on that day
+  if (held.length) { const hd = new Set(held.map(h => h.d)), why = held.map(h => `${fmtS(h.d)} (${h.swap}${h.with ? ' with ' + h.with : ''})`).join(', ');
+    j.held = held; j.dates = j.dates.filter(d => !hd.has(d));
+    W.audit('Shifts sync', 'Held for a pending swap', a.name, held.map(h => h.d).join(', '), 'Not sent', 'Pending Teams swap: ' + why);
+    if (!j.dates.length) { j.status = 'Not sent'; j.msg = `Held: a swap request is pending in Teams for ${why}. Publishing now would replace the shift and break the request. Send again after it is decided in Teams.`; return render(); }
+    j.heldMsg = `Held for a pending Teams swap: ${why}. `; }
   const probe=await pubCall({...W.publishPayload(a,W.dayRuns(j.dates)[0],(W.teamFor(a)||{}).teamId||W.ACC[a.acc].teamId),action:'preview'}); if(!probe.ok||probe.b.publisherVersion!==3){j.status='Not sent';j.msg='The publishing connection needs its activities update. Ask the administrator to install the new connection package; no shifts were changed.';W.audit('Shifts sync','Publishing blocked',a.name,'',j.status,j.msg);render();return;}
   j.status = 'Sending'; render(); const t = W.teamFor(a), teamId = (t && t.teamId) || W.ACC[a.acc].teamId, out = [], sleep = s => new Promise(r => setTimeout(r, s * 1000));
   for (const run of W.dayRuns(j.dates)) {
@@ -4177,7 +4191,7 @@ async function dbPublishJob(j, a) {
     j.okDates = (j.okDates || []).concat(run); W.markPublished(a.id, run);
     await sleep(Math.max(0.4, pubCalls(payload) * 60 / PUB_RATE - (Date.now() - t0) / 1000));   // pace the next request so Shifts doesn't throttle
   }
-  if (j.status !== 'Failed') j.status = 'Confirmed'; j.msg = 'Publishing · Shifts: ' + out.join(' · ');
+  if (j.status !== 'Failed') j.status = 'Confirmed'; j.msg = (j.heldMsg || '') + 'Publishing · Shifts: ' + out.join(' · ');
   W.audit('Shifts sync', j.status === 'Confirmed' ? 'Published to Shifts (pilot)' : 'Pilot publish failed', a.name, j.dates.join(', '), j.status, j.msg); render();
   const rec = (status, dates, msg) => ({ id:(crypto.randomUUID ? crypto.randomUUID() : j.id + '-' + Date.now()) , person_id:a.id, account_id:a.acc, action:j.action, dates, endpoint:j.endpoint, status, msg, team:teamId, notes:j.notes || null });
   const rows = [j.okDates && j.okDates.length ? rec('Confirmed', j.okDates, j.msg) : null, j.status === 'Failed' ? rec('Failed', j.dates.filter(d => !(j.okDates || []).includes(d)), j.msg) : null].filter(Boolean);
