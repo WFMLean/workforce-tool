@@ -4173,7 +4173,17 @@ async function dbPublishJob(j, a) {
     j.heldMsg = `Held for a pending Teams swap: ${why}. `; }
   const probe=await pubCall({...W.publishPayload(a,W.dayRuns(j.dates)[0],(W.teamFor(a)||{}).teamId||W.ACC[a.acc].teamId),action:'preview'}); if(!probe.ok||probe.b.publisherVersion!==3){j.status='Not sent';j.msg='The publishing connection needs its activities update. Ask the administrator to install the new connection package; no shifts were changed.';W.audit('Shifts sync','Publishing blocked',a.name,'',j.status,j.msg);render();return;}
   j.status = 'Sending'; render(); const t = W.teamFor(a), teamId = (t && t.teamId) || W.ACC[a.acc].teamId, out = [], sleep = s => new Promise(r => setTimeout(r, s * 1000));
-  for (const run of W.dayRuns(j.dates)) {
+  /* 2026-11-13 (publish v4): the flow can only delete + create (the Shifts connector has no "update a shift"), and every recreated shift gets
+     a new ID, which breaks pending swap/offer requests. So each run is previewed first and days that already match Shifts (times, label,
+     notes, activities; shared, no pending draft) are left alone: their shift IDs stay. Only changed days are sent. Preview fails → send all. */
+  const runs = [];
+  for (const run0 of W.dayRuns(j.dates)) {
+    const ch = await pubChangedDays(a, run0, teamId), same = ch ? run0.filter(d => !ch.includes(d)) : [];
+    if (same.length) { W.markPublished(a.id, same); j.okDates = (j.okDates || []).concat(same); j.kept = (j.kept || 0) + same.length;
+      out.push(`${same.length === 1 ? same[0] : same[0] + '…' + same[same.length - 1]} (${same.length} day${same.length === 1 ? '' : 's'}): already matches Shifts · not touched, shift IDs kept`); }
+    runs.push(...W.dayRuns(ch || run0)); await sleep(3 * 60 / PUB_RATE);
+  }
+  for (const run of runs) {
     const payload = W.publishPayload(a, run, teamId), span = run.length > 1 ? `${run[0]}→${run[run.length - 1]}` : run[0], t0 = Date.now();
     let done = false, last = '', tries = 0;
     for (let n = 1; n <= PUB_WAIT.length + 1 && !done; n++) {
@@ -4196,6 +4206,18 @@ async function dbPublishJob(j, a) {
   const rec = (status, dates, msg) => ({ id:(crypto.randomUUID ? crypto.randomUUID() : j.id + '-' + Date.now()) , person_id:a.id, account_id:a.acc, action:j.action, dates, endpoint:j.endpoint, status, msg, team:teamId, notes:j.notes || null });
   const rows = [j.okDates && j.okDates.length ? rec('Confirmed', j.okDates, j.msg) : null, j.status === 'Failed' ? rec('Failed', j.dates.filter(d => !(j.okDates || []).includes(d)), j.msg) : null].filter(Boolean);
   if (rows.length) { const { error } = await DB.sb.from('wft_sync_jobs').insert(rows); if (error) console.warn('sync job log', error.message); }
+}
+/* days in a run whose shifts in Shifts differ from what the tool would send (null = preview failed: send the whole run) */
+async function pubChangedDays(a, run, teamId) {
+  const payload = W.publishPayload(a, run, teamId), r = await pubCall({ ...payload, action:'preview' }); if (!r.ok) return null;
+  const day = iso => W.toZoneLocal(a.acc, iso)[0], have = {}, want = {};
+  try {
+    (r.b.existingShifts || []).forEach(s => { const sh = s.sharedShift, dr = s.draftShift, x = sh || dr || {};
+      const sig = sh && !(dr && W.shiftSignature(dr) !== W.shiftSignature(sh)) ? W.shiftSignature(sh) : 'draft';   // unshared edits → send ours
+      (have[day(x.startDateTime)] = have[day(x.startDateTime)] || []).push(sig); });
+    (payload.shifts || []).forEach(x => (want[day(x.start)] = want[day(x.start)] || []).push(W.shiftSignature(x)));
+  } catch (e) { return null; }
+  return run.filter(d => JSON.stringify((have[d] || []).sort()) !== JSON.stringify((want[d] || []).sort()));
 }
 /* two-way Shifts check (accounts enabled for publishing): read the team, compare per person-day, take Shifts' version where Shifts is newer */
 /* accounts whose people, stations and schedules come straight from their Shifts team (reader flow). Crane comes from the portal feed. */
