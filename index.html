@@ -3300,7 +3300,7 @@ function accTrendChart(rows, weeks) {
   const col = id => `var(--acc-${id},var(--acc))`;
   const ends = series.map(s => { let i = s.pts.length - 1; while (i >= 0 && !Number.isFinite(s.pts[i][1])) i--; return i < 0 ? null : { s, i, v:s.pts[i][1], y:y(s.pts[i][1]) }; }).filter(Boolean).sort((a, b) => a.y - b.y);
   ends.forEach((e, k) => { e.ly = Math.max(e.y, k ? ends[k - 1].ly + 16 : pt + 6); });                 // push labels down so they never overlap
-  for (let k = ends.length - 1; k >= 0; k--) if (ends[k].ly > pt + ih) ends[k].ly = Math.min(ends[k].ly, k < ends.length - 1 ? ends[k + 1].ly - 16 : pt + ih);
+  for (let k = ends.length - 1; k >= 0; k--) ends[k].ly = Math.min(ends[k].ly, k < ends.length - 1 ? ends[k + 1].ly - 16 : pt + ih);   // then pull back up from the floor, keeping 16 px apart
   const lines = series.map(s => { const g = [], out = []; s.pts.forEach(([, v], i) => { if (Number.isFinite(v)) g.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`); else if (g.length) { out.push(g.splice(0)); } }); if (g.length) out.push(g);
     return out.map(seg => `<polyline class="t-line" style="stroke:${col(s.id)}" points="${seg.join(' ')}"/>`).join('') +
       s.pts.map(([w, v], i) => Number.isFinite(v) ? `<circle class="t-dot" cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${i === s.pts.length - 1 ? 4 : 2.6}" style="fill:${col(s.id)}"><title>${esc(s.name)} · week of ${fmtS(w)}: ${fmtPct(v)}</title></circle>` : '').join(''); }).join('');
