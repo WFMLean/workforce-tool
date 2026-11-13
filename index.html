@@ -537,7 +537,8 @@ tr.click:hover>td{background:color-mix(in srgb,var(--tintA) 7%,transparent)}
 .heat td.hc small{font-weight:600;opacity:.85}
 
 /* account trend chart */
-.trend{position:relative}.trend svg{display:block;width:100%;height:auto;overflow:visible}
+.trend{position:relative}.trend svg{display:block;max-width:100%;height:auto;overflow:visible}
+.chart-scroll svg{max-width:100%;height:auto}
 .trend .t-line{fill:none;stroke-width:2.25;stroke-linejoin:round;stroke-linecap:round}
 .trend .t-dot{stroke:var(--ground);stroke-width:2}
 .trend .t-lab{font:600 12px var(--sans);fill:var(--ink)}.trend .t-lab tspan{fill:var(--ink2);font-weight:500}
@@ -568,6 +569,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus
 .skip:focus{top:10px}
 main:focus{outline:none}
 input[type=date]:focus,input[type=time]:focus{outline:2px solid color-mix(in srgb,var(--tintA) 85%,var(--ink))!important;outline-offset:2px}
+.accsel{position:relative;display:inline-flex;align-items:center;flex:0 0 auto}
+.accsel .adot{position:absolute;left:11px;width:9px;height:9px;border-radius:50%;background:var(--c);pointer-events:none;box-shadow:0 0 0 1px var(--glass-line)}
+.accsel select{min-width:210px;min-height:34px;padding-left:28px;font-weight:600;background:color-mix(in srgb,var(--tintA) 16%,var(--glass));border-color:color-mix(in srgb,var(--tintA) 45%,transparent)}
 details.adv{margin-top:14px}details.adv>summary{cursor:pointer;padding:12px 16px;border:1px solid var(--glass-line);border-radius:14px;background:var(--glass);font-weight:600;color:var(--ink2);list-style-position:inside}
 details.adv[open]>summary{margin-bottom:14px}details.adv>summary:hover{color:var(--ink)}
 @media (max-width:780px){.top{flex-wrap:wrap}}
@@ -2520,6 +2524,10 @@ function a11yPass(root) {
     t = (t || el.title || el.placeholder || el.dataset.f || el.dataset.v || el.name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
     if (t) el.setAttribute('aria-label', t);
   });
+  // selected state for screen readers: segmented buttons, chips and shift chips say whether they are on; the chosen station row is current
+  root.querySelectorAll('.seg button,.chips .chip,.bchip').forEach(b => b.setAttribute('aria-pressed', b.classList.contains('on') ? 'true' : 'false'));
+  root.querySelectorAll('tr.selrow td[data-a]').forEach(td => td.setAttribute('aria-current', 'true'));
+  root.querySelectorAll('td[data-a],tr[data-a],div[data-a]').forEach(el => { if (!el.hasAttribute('tabindex')) el.tabIndex = 0; if (!el.getAttribute('role')) el.setAttribute('role', 'button'); });   // clickable cells reachable by keyboard
   root.querySelectorAll('.tw,#gwrap,.chart-scroll,.spk-l').forEach(el => {
     if (el.hasAttribute('tabindex')) return;
     el.tabIndex = 0; if (!el.getAttribute('role')) el.setAttribute('role', 'region');
@@ -2774,7 +2782,7 @@ function shell() {
         return `<button class="navsec ${col ? 'col' : ''}" data-a="navSec" data-v="${sec}" aria-expanded="${!col}"><span>${sec}</span><i class="car">▾</i></button>` + `<div class="navitems" ${col?'hidden':''}>${v.map(btn).join('')}</div>`; }).join('')}
       <div class="foot"><button class="btn sm ghost" data-a="rail" title="${S.rail ? 'Expand menu' : 'Collapse to icons'}" aria-label="Toggle menu width">${S.rail ? '»' : '«'}</button><span class="ft meta">Workforce Tool</span></div></nav>
     <div>
-      <div class="top"><div class="chips" role="group" aria-label="Account">${chips.map(([k, l]) => `<button class="chip ${S.acc === k ? 'on' : ''}" data-a="acc" data-v="${k}">${l}</button>`).join('')}</div>
+      <div class="top"><label class="accsel" title="Account"><span class="adot" style="--c:${S.acc === 'all' ? 'transparent' : 'var(--acc-' + S.acc + ',var(--acc))'}" aria-hidden="true"></span><select class="in" data-f="accSel" aria-label="Account">${chips.map(([k, l]) => `<option value="${k}" ${S.acc === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
         <select class="in" data-f="loc" aria-label="Location" style="width:auto;min-height:30px;padding:3px 8px"><option value="all">All locations</option>${locList().map(x => `<option ${S.loc === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
         <button class="srch" data-a="cmdOpen" aria-label="Search people and pages"><span>⌕</span><span class="t">Search people & pages</span></button>
         <span class="sp"></span><span id="syncPill">${syncPill()}</span>
@@ -2964,7 +2972,7 @@ function pSchedule() {
     <span class="sp"></span><label class="nowrap"><input type="checkbox" data-f="pubAuto" ${P.auto ? 'checked' : ''} ${isAdmin() ? '' : 'disabled'}> Auto-roll</label><button class="btn sm" data-a="rollPrev">Preview next week</button></div>`;
   const inS = W.inactiveFlags({ acc:S.acc }).filter(x => x.futureShifts > 0 && lobOk(W.LOB[x.a.key] || {}));
   return scheduleReadStatus() + (inS.length ? `<div class="note bad" style="margin-bottom:12px">${inS.length} inactive ${inS.length > 1 ? 'people still have' : 'person still has'} shifts in Shifts (${inS.slice(0, 4).map(x => esc(x.a.name)).join(', ')}${inS.length > 4 ? '…' : ''}). They're hidden here and not counted in coverage. <button class="btn sm" data-a="goInactive">Review</button></div>` : '') + `<div class="head"><div class="grow"><div class="kicker">Current shifts · saved original · change history</div><h1><b>Schedule</b> &amp; coverage</h1><p class="sub">View the latest schedule and compare each day with the saved original. Click a day for its change history. Prepare and publish changes in Edit schedules.</p></div>
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="btn sm" data-a="shiftFrom" data-v="-14">←</button><span class="num" style="min-width:150px;text-align:center">${fmtS(ds[0])} – ${fmtS(ds[13])}</span><button class="btn sm" data-a="shiftFrom" data-v="14">→</button><button class="btn sm ghost" data-a="shiftFrom" data-v="0">This week</button>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="btn sm" data-a="shiftFrom" data-v="-14">←</button><span class="num" style="min-width:150px;text-align:center">${fmtS(ds[0])} – ${fmtS(ds[13])}</span><button class="btn sm" data-a="shiftFrom" data-v="14">→</button><button class="btn sm ghost" data-a="shiftFrom" data-v="0" ${S.from === weekStart(TODAY) ? 'disabled aria-pressed="true" title="Already showing this week"' : ''}>This week</button>
 </div></div>
   <section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>Coverage heatmap by account</h2><p class="sub">People scheduled after recorded leave / configured daily reference (${Math.round(W.CFG.reqPct * 100)}% of people on the repeating schedule, rounded with a 1–2 person floor). Active roster headcount is shown separately. This is not based on workload. Click a row to open its schedule, or a cell for the day's detail.</p></div></div>
     <div class="tw"><table class="heat"><thead><tr><th>Location · station</th>${hdr}</tr></thead><tbody>${heat}</tbody></table></div>
@@ -3263,11 +3271,11 @@ function lineChart(series, target, lo, hi) {
   const dates = [...new Set(series.flatMap(s => s.pts.map(p => p[0])))].sort();
   const min = Math.min(lo, ...values, ...(Number.isFinite(target) ? [target] : [])), max = Math.max(hi, ...values, ...(Number.isFinite(target) ? [target] : []));
   const step = Math.max(1, Math.ceil((max - min || 10) / 4 / 5) * 5), bottom = Math.floor(min / step) * step, top = Math.max(bottom + step, Math.ceil(max / step) * step);
-  const Wd = 620, H = 240, pl = 48, pr = 20, pt = 16, pb = 32, iw = Wd - pl - pr, ih = H - pt - pb;
+  const Wd = chartW(.62, 560, 1100), H = 240, pl = 48, pr = 20, pt = 16, pb = 32, iw = Wd - pl - pr, ih = H - pt - pb;
   const x = d => pl + iw * (dates.length === 1 ? .5 : dates.indexOf(d) / (dates.length - 1)), y = v => pt + ih - (v - bottom) / (top - bottom) * ih;
   const ticks = []; for (let t = bottom; t <= top; t += step) ticks.push(t);
   const every = Math.max(1, Math.ceil((dates.length - 1) / 5));
-  return `<div class="line-chart"><div class="chart-legend">${series.map((s,i) => { const last = [...s.pts].reverse().find(p => Number.isFinite(p[1])); return `<div class="chart-key"><span class="chart-swatch" style="--series:${s.color};${i ? 'border-top-style:dashed' : ''}"></span><span>${esc(s.name)}</span><b>${last ? fmtPct(last[1]) : '—'}</b>${last ? `<small>${fmtS(last[0])}</small>` : ''}</div>`; }).join('')}${Number.isFinite(target) ? `<div class="chart-key chart-target"><span class="chart-swatch"></span><span>Target</span><b>${fmtPct(target)}</b></div>` : ''}</div><div class="chart-scroll"><svg viewBox="0 0 ${Wd} ${H}" width="100%" role="img" aria-label="Percentage trend by date. Series values and target are listed above.">
+  return `<div class="line-chart"><div class="chart-legend">${series.map((s,i) => { const last = [...s.pts].reverse().find(p => Number.isFinite(p[1])); return `<div class="chart-key"><span class="chart-swatch" style="--series:${s.color};${i ? 'border-top-style:dashed' : ''}"></span><span>${esc(s.name)}</span><b>${last ? fmtPct(last[1]) : '—'}</b>${last ? `<small>${fmtS(last[0])}</small>` : ''}</div>`; }).join('')}${Number.isFinite(target) ? `<div class="chart-key chart-target"><span class="chart-swatch"></span><span>Target</span><b>${fmtPct(target)}</b></div>` : ''}</div><div class="chart-scroll"><svg viewBox="0 0 ${Wd} ${H}" width="${Wd}" height="${H}" role="img" aria-label="Percentage trend by date. Series values and target are listed above.">
     ${ticks.map(t => `<line x1="${pl}" x2="${Wd - pr}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${pl - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="var(--ink3)">${t}%</text>`).join('')}
     ${dates.map((d,i) => i % every === 0 || i === dates.length - 1 && i % every > every / 2 ? `<text x="${x(d)}" y="${H - 8}" text-anchor="${i===0&&dates.length>1?'start':i===dates.length-1&&dates.length>1?'end':'middle'}" font-size="11" fill="var(--ink3)">${fmtS(d)}</text>` : '').join('')}
     ${Number.isFinite(target) ? `<line x1="${pl}" x2="${Wd - pr}" y1="${y(target)}" y2="${y(target)}" stroke="var(--bad)" stroke-dasharray="3 5"/>` : ''}
@@ -3332,30 +3340,33 @@ const spark = (vals, t) => { const v = vals.map(x => x == null ? 0 : x), mx = Ma
   return `<svg class="spark" width="${W2}" height="${H2}" viewBox="0 0 ${W2} ${H2}" aria-hidden="true"><line x1="0" x2="${W2}" y1="${y(t)}" y2="${y(t)}" stroke="var(--bad)" stroke-dasharray="3 3" opacity=".6"/><polyline fill="none" stroke="var(--acc)" stroke-width="1.6" points="${v.map((q, i) => x(i) + ',' + y(q)).join(' ')}"/><circle cx="${x(v.length - 1)}" cy="${y(v[v.length - 1])}" r="2.5" fill="var(--acc)"/></svg>`; };
 /* Account summary trend (glass redesign, 2026-11-13): absence by week, one line per account in its account colour,
    each line labelled at its end so nobody has to match a legend. Labels are pushed apart when values are close. */
+/* charts are drawn at the width they are shown (2026-11-13): a fixed 620/940 px drawing stretched to a 1,700 px panel made every label ~2× too big */
+const chartW = (share = 1, lo = 560, hi = 1700) => { const m = typeof document !== 'undefined' && document.getElementById('main'); return Math.round(Math.max(lo, Math.min(hi, ((m && m.clientWidth) || 1200) * share - 56))); };
 function accTrendChart(rows, weeks) {
   const series = rows.map(r => ({ id:r.acc.id, name:r.acc.name, pts:r.trend.map((v, i) => [weeks[i], v]), target:r.acc.absTarget }));
   const vals = series.flatMap(s => s.pts.map(p => p[1])).filter(Number.isFinite);
   if (!vals.length) return '<div class="chart-empty"><b>No absence data for the last 8 weeks</b><span>Absence shows once schedules and leave have loaded for these accounts.</span></div>';
   const targets = [...new Set(series.map(s => s.target).filter(Number.isFinite))];
   const hi = Math.max(...vals, ...targets, 1), step = hi > 20 ? 5 : hi > 8 ? 2 : 1, top = Math.ceil(hi * 1.12 / step) * step;
-  const Wd = 940, H = 250, pl = 40, pr = 170, pt = 12, pb = 28, iw = Wd - pl - pr, ih = H - pt - pb;
+  const Wd = chartW(1, 640), H = 260, pl = 40, pr = 190, pt = 14, pb = 28, iw = Wd - pl - pr, ih = H - pt - pb;
   const x = i => pl + iw * (weeks.length === 1 ? .5 : i / (weeks.length - 1)), y = v => pt + ih - v / top * ih;
   const ticks = []; for (let t = 0; t <= top; t += step) ticks.push(t);
   const col = id => `var(--acc-${id},var(--acc))`;
-  const ends = series.map(s => { let i = s.pts.length - 1; while (i >= 0 && !Number.isFinite(s.pts[i][1])) i--; return i < 0 ? null : { s, i, v:s.pts[i][1], y:y(s.pts[i][1]) }; }).filter(Boolean).sort((a, b) => a.y - b.y);
+  const ends = [...series.map(s => { let i = s.pts.length - 1; while (i >= 0 && !Number.isFinite(s.pts[i][1])) i--; return i < 0 ? null : { s, i, v:s.pts[i][1], y:y(s.pts[i][1]) }; }).filter(Boolean),
+    ...(targets.length === 1 ? [{ target:true, v:targets[0], y:y(targets[0]) }] : [])].sort((a, b) => a.y - b.y);   // the target is labelled in the same column, so it never sits on a line
   ends.forEach((e, k) => { e.ly = Math.max(e.y, k ? ends[k - 1].ly + 16 : pt + 6); });                 // push labels down so they never overlap
   for (let k = ends.length - 1; k >= 0; k--) ends[k].ly = Math.min(ends[k].ly, k < ends.length - 1 ? ends[k + 1].ly - 16 : pt + ih);   // then pull back up from the floor, keeping 16 px apart
   const lines = series.map(s => { const g = [], out = []; s.pts.forEach(([, v], i) => { if (Number.isFinite(v)) g.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`); else if (g.length) { out.push(g.splice(0)); } }); if (g.length) out.push(g);
     return out.map(seg => `<polyline class="t-line" style="stroke:${col(s.id)}" points="${seg.join(' ')}"/>`).join('') +
       s.pts.map(([w, v], i) => Number.isFinite(v) ? `<circle class="t-dot" cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${i === s.pts.length - 1 ? 4 : 2.6}" style="fill:${col(s.id)}"><title>${esc(s.name)} · week of ${fmtS(w)}: ${fmtPct(v)}</title></circle>` : '').join(''); }).join('');
-  const tgt = targets.length === 1 ? `<line class="t-target" x1="${pl}" x2="${pl + iw}" y1="${y(targets[0])}" y2="${y(targets[0])}"/><text class="t-axis" x="${pl + 6}" y="${y(targets[0]) - 6}">Target ${fmtPct(targets[0])}</text>`
-    : targets.map(t => `<line class="t-target" x1="${pl}" x2="${pl + iw}" y1="${y(t)}" y2="${y(t)}"/>`).join('');
-  const summary = ends.map(e => `${e.s.name} ${fmtPct(e.v)}`).join(', ');
-  return `<div class="trend"><svg viewBox="0 0 ${Wd} ${H}" role="img" aria-label="Absence by week, last 8 weeks, one line per account. Latest: ${esc(summary)}.">
+  const tgt = targets.map(t => `<line class="t-target" x1="${pl}" x2="${pl + iw}" y1="${y(t)}" y2="${y(t)}"/>`).join('');
+  const summary = ends.filter(e => !e.target).map(e => `${e.s.name} ${fmtPct(e.v)}`).join(', ') + (targets.length === 1 ? `; target ${fmtPct(targets[0])}` : '');
+  return `<div class="trend"><svg viewBox="0 0 ${Wd} ${H}" width="${Wd}" height="${H}" role="img" aria-label="Absence by week, last 8 weeks, one line per account. Latest: ${esc(summary)}.">
     ${ticks.map(t => `<line class="t-grid" x1="${pl}" x2="${pl + iw}" y1="${y(t)}" y2="${y(t)}"/><text class="t-axis" x="${pl - 8}" y="${y(t) + 4}" text-anchor="end">${t}%</text>`).join('')}
     ${weeks.map((w, i) => `<text class="t-axis" x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === weeks.length - 1 ? 'end' : 'middle'}">${fmtS(w)}</text>`).join('')}
     ${tgt}${lines}
-    ${ends.map(e => `${Math.abs(e.ly - e.y) > 2 ? `<path d="M${x(e.i) + 6} ${e.y} L${pl + iw + 10} ${e.ly}" stroke="${col(e.s.id)}" stroke-width="1" opacity=".5" fill="none"/>` : ''}<text class="t-lab" x="${pl + iw + 14}" y="${e.ly + 4}">${esc(e.s.name)} <tspan>${fmtPct(e.v)}</tspan></text>`).join('')}
+    ${ends.map(e => e.target ? `<line class="t-target" x1="${pl + iw + 14}" x2="${pl + iw + 30}" y1="${e.ly}" y2="${e.ly}"/><text class="t-axis" x="${pl + iw + 36}" y="${e.ly + 4}">Target ${fmtPct(e.v)}</text>`
+      : `${Math.abs(e.ly - e.y) > 2 ? `<path d="M${x(e.i) + 6} ${e.y} L${pl + iw + 10} ${e.ly}" stroke="${col(e.s.id)}" stroke-width="1" opacity=".5" fill="none"/>` : ''}<text class="t-lab" x="${pl + iw + 14}" y="${e.ly + 4}">${esc(e.s.name)} <tspan>${fmtPct(e.v)}</tspan></text>`).join('')}
   </svg></div>`;
 }
 /* Severity of one account-day in the 14-day schedule check: colour class and strength 1-3 (glass redesign, 2026-11-13).
@@ -3367,22 +3378,31 @@ function heatClass(n) {
   if (n.tight) return { cls:'tight', lvl:of(n.tight) >= .5 ? 3 : of(n.tight) >= .2 ? 2 : 1 };
   return { cls:'ok', lvl:1 };
 }
+let OV_CACHE = null, OV_REV = 0; W.onChange(() => { OV_REV++; });   // Account summary cache; any data change invalidates it
 function pOverview() {
   const accs = W.ACCOUNTS.filter(a => inScope(a.id)), live = W.live(), from4 = addD(weekStart(TODAY), -21), ds = range(TODAY, addD(TODAY, 13));
   const weeks = Array.from({ length:8 }, (_, i) => addD(weekStart(TODAY), -7 * (7 - i)));
-  const rows = accs.map(acc => {
-    const lv = live.filter(r => r.a.acc === acc.id && !r.a.inactive), on = lv.filter(r => ['in','inlate','late','out'].includes(r.st));
+  /* the heavy figures (absence, adherence, 14-day checks, trend, next-week audit) are cached: the 30 s clock tick used to recompute them
+     for ~900 people every time and froze the page for up to 1.7 s, so clicks felt dead (2026-11-13). Live-floor counts stay fresh. */
+  const ovKey = [OV_REV, TODAY, S.acc, S.loc, accs.map(a => a.id).join(), W.AG.length, W.REQ.length, W.SWAPS.length, Object.values(DB.teams || {}).map(x => x.st + (x.loaded ? 1 : 0)).join()].join('|');
+  if (!OV_CACHE || OV_CACHE.key !== ovKey || Date.now() - OV_CACHE.at > 300000) OV_CACHE = { key:ovKey, at:Date.now(), acc:{} };
+  const heavy = acc => OV_CACHE.acc[acc.id] || (OV_CACHE.acc[acc.id] = (() => {
     const A = W.absStats({ from:from4, to:TODAY, acc:acc.id }), H = W.adhStats({ from:addD(TODAY, -6), to:TODAY, acc:acc.id }).T;
     const lobs = W.LOBS.filter(l => l.acc === acc.id);
     let risk = 0, over = 0; const heat = ds.map(d => { let short = 0, tight = 0; lobs.forEach(l => { const c = W.cov(l.key, d); if (c.req && c.avail - c.pend < c.req) short++; else if (c.req && c.avail - c.pend < c.req + 2) tight++; if (W.allocation(l.key, d).left < 0) over++; }); risk += short ? 1 : 0; return { short, tight, total:lobs.length }; });
     const trend = weeks.map(w => { const x = A.byW[w]; if (x) return pct(x.pl + x.un, x.sched); const y = W.absStats({ from:w, to:addD(w, 6), acc:acc.id }).T; return pct(y.pl + y.un, y.sched); });
+    return { A, H, risk, over, heat, trend };
+  })());
+  const rows = accs.map(acc => {
+    const lv = live.filter(r => r.a.acc === acc.id && !r.a.inactive), on = lv.filter(r => ['in','inlate','late','out'].includes(r.st));
+    const { A, H, risk, over, heat, trend } = heavy(acc);
     return { acc, hc:W.AG.filter(a => a.acc === acc.id && !a.inactive).length, sched:lv.filter(r => r.s.working && !r.s.absence && r.d === W.accountClock(acc.id).day).length, on:on.length,
       logged:on.filter(r => r.st === 'in' || r.st === 'inlate').length, miss:lv.filter(r => ['late','out','nologin'].includes(r.st)).length, leave:lv.filter(r => r.st === 'leave').length,
       abs:pct(A.T.pl + A.T.un, A.T.sched), un:pct(A.T.un, A.T.sched), adh:pct(H.inA, H.span), pend:W.REQ.filter(r => r.status === 'Pending' && W.AGI[r.agent].acc === acc.id).length, risk, over, heat, trend };
   });
   const T = rows.reduce((o, r) => { ['hc','sched','on','logged','miss','leave','pend','risk','over'].forEach(k => o[k] = (o[k] || 0) + r[k]); return o; }, {});
-  const noSch = W.scheduleAudit(addD(weekStart(TODAY), 7), {}).filter(x => inScope(x.a.acc) && (S.acc === 'all' || x.a.acc === S.acc) && x.issues.some(i => i.k === 'none')).length;
-  const At = W.absStats({ from:from4, to:TODAY, acc:accs.length === 1 ? accs[0].id : 'all' }).T, Ht = W.adhStats({ from:addD(TODAY, -6), to:TODAY, acc:accs.length === 1 ? accs[0].id : 'all' }).T;
+  const noSch = OV_CACHE.noSch ?? (OV_CACHE.noSch = W.scheduleAudit(addD(weekStart(TODAY), 7), {}).filter(x => inScope(x.a.acc) && (S.acc === 'all' || x.a.acc === S.acc) && x.issues.some(i => i.k === 'none')).length);
+  const { At, Ht } = OV_CACHE.tot || (OV_CACHE.tot = { At:W.absStats({ from:from4, to:TODAY, acc:accs.length === 1 ? accs[0].id : 'all' }).T, Ht:W.adhStats({ from:addD(TODAY, -6), to:TODAY, acc:accs.length === 1 ? accs[0].id : 'all' }).T });
   return `<div class="head"><div class="grow"><div class="kicker">${fmtD(W.floor.day, { weekday:'long', month:'long', day:'numeric' })} · ${hm(W.clock)} · ${esc(W.floor.zone)} · ${accs.length} account${accs.length > 1 ? 's' : ''}</div><h1>Corporate <b>overview</b></h1><p class="sub">One line per account. ABS = last 4 weeks, adherence = last 7 days, schedule checks = next 14 days. Click an account to open its live floor.</p></div></div>
   ${(n => n ? `<div class="alarm" style="display:flex;align-items:center;gap:12px"><span class="pulse"></span><div class="grow"><b>${n} inactive ${n > 1 ? 'people are' : 'person is'} still scheduled in Shifts.</b> <span class="sub">They're already left out of ABS, adherence and coverage.</span></div><button class="btn sm" data-a="goInactive">Review</button></div>` : '')(W.inactiveFlags({ acc:S.acc }).filter(x => inScope(x.a.acc) && x.futureShifts > 0).length)}
   <div class="strip">
@@ -5650,7 +5670,7 @@ const A = {
   auAssign: () => { S.picked = new Set(S.auPick); assignDrawer(); $('asF').value = addD(weekStart(TODAY), 7 * S.auWk); },
   expAu: () => { const ws=addD(weekStart(TODAY),7*S.auWk),rows=auditExportRows(ws);W.ui.csv('schedule-audit-'+ws+'.csv',[['Week','Agent','ID','Account','Site','Station','Team lead','Pattern','Shifts','Issues'],...rows.map(x=>[ws,x.a.name,x.a.id,W.ACC[x.a.acc].name,W.locOf(x.a),x.a.station||(W.LOB[x.a.key]||{}).station||x.a.lob,x.a.tl,W.PATTERNS[x.pattern].name,x.work,x.issues.filter(i=>S.auF==='all'||i.k===S.auF).map(i=>i.t).join('; ')])]);toast(rows.length+' filtered rows downloaded'); },
   wiPreset: el => { S.wi = JSON.parse(JSON.stringify(WI_PRESETS[+el.dataset.v][1])); render(); },
-  wiReset: () => { S.wi = {}; render(); },
+  wiReset: () => { const n = Object.keys(S.wi || {}).length; S.wi = {}; toast(n ? 'Staffing changes reset to today\'s saved schedule' : 'Nothing to reset: no changes tried yet'); render(); },
   exType: el => { const r = W.RCFG[el.dataset.v]; W.setReason(r.k, { type:r.type === 'planned' ? 'unplanned' : 'planned' }); OPS.reasons=W.REASONS.map(x=>({...x})); saveOps(); toast(`${r.k} is now ${r.type}`); render(); },
   exSet: el => { W.setReason(el.dataset.k, { [el.dataset.f2]:el.dataset.v }); OPS.reasons=W.REASONS.map(x=>({...x})); saveOps(); render(); },
   mapLegacy: el => { const x = W.LEGACY_REASONS[+el.dataset.v], to = $('lgM' + el.dataset.v).value; x.mapped = to; W.audit('Absence reasons', 'Legacy reason mapped', x.k, `${x.records} records`, to, x.source); toast(`${x.k} → ${to}`); render(); },
@@ -5716,7 +5736,7 @@ const A = {
   coCopyGo: async () => { const t = $('coTxt'); try { await navigator.clipboard.writeText(t.value); toast('Copied · paste it in Teams'); } catch (e) { t.select(); document.execCommand('copy'); toast('Copied'); } },
   chkType: el => { S.chk.type = el.dataset.v; S.chk.page = 0; render(); },
   chkPage: el => { S.chk.page += +el.dataset.v; render(); },
-  reqRefresh: () => refreshTeamRequests(),
+  reqRefresh: async () => { if (scheduleReadBusy) return toast('Already reading Teams… the list updates when it finishes'); if (!DB.on || !CONN.readUrl) return toast('Teams requests can\'t refresh: the Shifts reader isn\'t connected (Connected services)'); toast('Reading Teams requests…'); await refreshTeamRequests(); const e = Object.values(DB.requests || {}).map(x => x.err).filter(Boolean); toast(e.length ? 'Some requests didn\'t load: ' + e[0] : 'Teams requests refreshed'); },
   chkRun: () => { toast('Reading Shifts…'); dbShiftsCheck(S.chk.acc, null, ['Admin','RTA'].includes(W.ME.role)); },
   chkTake: el => { const c = W.SCHK[S.chk.acc], r = c && c.rows.find(x => x.k === el.dataset.v); if (!r) return; W.adoptShifts(r); r.done = true; c.rows = c.rows.filter(x => x !== r); c.st.side[r.side]--; c.st[r.type]--; c.st.match++; toast(`${r.a.name} · ${fmtS(r.d)} now matches Shifts`); render(); },
   chkTakeAll: () => { const c = W.SCHK[S.chk.acc]; if (!c) return; const t = c.rows.filter(r => r.side === 'shifts'); t.forEach(r => W.adoptShifts(r)); toast(`${t.length} day${t.length === 1 ? '' : 's'} taken from Shifts`); dbShiftsCheck(S.chk.acc, null, false); },
@@ -5802,6 +5822,7 @@ document.addEventListener('input', e => { const k = e.target.dataset.f;
 document.addEventListener('change', e => { const k = e.target.dataset.f, v = e.target.value;
   if (k === 'adhLob') S.adhLob = v; else if (k === 'absLob') S.absLob = v; else if (k === 'audMod') { S.aud.mod = v; S.aud.page = 0; } else if (k === 'audUser') { S.aud.user = v; S.aud.page = 0; }
   else if (k === 'loc') { S.loc = v; W.setLoc(v); S.adhLob = 'all'; S.absLob = 'all'; }
+  else if (k === 'accSel') { A.acc({ dataset:{ v } }); return; }
   else if (k === 'spk' || k === 'spkLoc') { spkChange(k, e.target); return; }
   else if (k === 'swp') { bSwapRead(); $('drB').innerHTML = bSwapBody(); return; }
   else if (k === 'accTz') { if (!isAdmin()) return; W.setAccTz(e.target.dataset.k, v); dbSaveAccTz(); }
@@ -5884,6 +5905,7 @@ function readRoster(f) {
   rd.readAsArrayBuffer(f);
 }
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target.id === 'lgE' || e.target.id === 'lgP')) A.login(); });
+document.addEventListener('keydown', e => { if (!['Enter', ' '].includes(e.key)) return; const el = e.target; if (el && el.matches && el.matches('[role=button][data-a]:not(button):not(a):not(input):not(select)')) { e.preventDefault(); el.click(); } });   // clickable cells work with the keyboard
 setInterval(() => { const f = W.floor; if (f.live && S.auth && ['live','overview'].includes(S.page) && !document.activeElement.matches('input,select,textarea') && !S.spk && !$('drawer').classList.contains('on')) { W.refreshFloor(); render(); } }, 30000);
 W.onChange(() => {
   if (!S.auth) return;
