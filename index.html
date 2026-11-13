@@ -3430,9 +3430,12 @@ function locPanel() {
   const live = W.live(), from4 = addD(weekStart(TODAY), -21), keepLoc = S.loc;
   const rows = locs.filter(x => S.loc === 'all' || x === S.loc).map(loc => {
     W.LOCF.v = loc;
-    const A = W.absStats({ from:from4, to:TODAY, acc:S.acc }).T, H = W.adhStats({ from:addD(TODAY, -6), to:TODAY, acc:S.acc }).T;
+    const C = OV_CACHE && (OV_CACHE.loc = OV_CACHE.loc || {}), hv = (C && C[loc]) || (o => (C && (C[loc] = o), o))({   // same cache as Account summary
+      A:W.absStats({ from:from4, to:TODAY, acc:S.acc }).T, H:W.adhStats({ from:addD(TODAY, -6), to:TODAY, acc:S.acc }).T,
+      nos:W.scheduleAudit(addD(weekStart(TODAY), 7), { acc:S.acc }).filter(x => x.issues.some(i => i.k === 'none')).length });
+    const A = hv.A, H = hv.H;
     const lobs = W.LOBS.filter(l => lobOk({ ...l, site:l.site }) && l.site === loc), lv = live.filter(r => inScope(r.a.acc) && (S.acc === 'all' || r.a.acc === S.acc) && W.locOf(r.a) === loc), on = lv.filter(r => ['in','inlate','late','out'].includes(r.st));
-    const nos = W.scheduleAudit(addD(weekStart(TODAY), 7), { acc:S.acc }).filter(x => x.issues.some(i => i.k === 'none')).length;
+    const nos = hv.nos;
     return { loc, st:lobs.length, hc:lobs.reduce((t, l) => t + l.hc, 0), on:on.length, logged:on.filter(r => r.st === 'in' || r.st === 'inlate').length, miss:lv.filter(r => ['late','out','nologin'].includes(r.st)).length, nodata:lv.filter(r => r.st === 'nodata').length, abs:pct(A.pl + A.un, A.sched), un:pct(A.un, A.sched), adh:pct(H.inA, H.span), nos };
   });
   W.LOCF.v = keepLoc;
