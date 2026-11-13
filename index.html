@@ -559,6 +559,17 @@ tr.click:hover>td{background:color-mix(in srgb,var(--tintA) 7%,transparent)}
   [data-a="pageHelp"] .hl{display:none}[data-a="pageHelp"] .hs{display:inline}}
 @media (max-width:1279px){.top .chips{flex:0 1 auto}}
 table.heat{border-collapse:separate;border-spacing:3px}.heat td.hc{border:0}.heat td,.heat th{border-bottom:0}
+/* accessibility (2026-11-13 audit) */
+:root[data-theme="light"]{--warn:#8a5800;--ok:#0b6b45;--acc:#0052cc}
+.bcopy{opacity:1}.bchip small{opacity:1}.seg .num{opacity:1!important;color:var(--ink3)}.hc span[style*="opacity:.55"]{opacity:1!important}
+.morel,.linkbtn{min-height:24px;display:inline-flex;align-items:center}
+input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid color-mix(in srgb,var(--tintA) 85%,var(--ink))!important;outline-offset:2px}
+.skip{position:absolute;left:12px;top:-60px;z-index:200;padding:8px 14px;border-radius:10px;background:var(--pri);color:#fff;font-weight:600;text-decoration:none;transition:top .15s}
+.skip:focus{top:10px}
+main:focus{outline:none}
+input[type=date]:focus,input[type=time]:focus{outline:2px solid color-mix(in srgb,var(--tintA) 85%,var(--ink))!important;outline-offset:2px}
+details.adv{margin-top:14px}details.adv>summary{cursor:pointer;padding:12px 16px;border:1px solid var(--glass-line);border-radius:14px;background:var(--glass);font-weight:600;color:var(--ink2);list-style-position:inside}
+details.adv[open]>summary{margin-bottom:14px}details.adv>summary:hover{color:var(--ink)}
 @media (max-width:780px){.top{flex-wrap:wrap}}
 </style>
 </head>
@@ -2497,6 +2508,24 @@ const vsTarget = (v, t, higherBetter) => v == null ? '' : `<span class="pill ${(
 let tt; const toast = m => { const t = $('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2600); };
 
 /* ---------- render ---------- */
+/* accessibility pass after every render (2026-11-13 audit): every select/input gets an accessible name from its visible label,
+   and scrolling tables become keyboard-reachable regions. Explicit labels in the markup always win. */
+function a11yPass(root) {
+  root.querySelectorAll('select,input:not([type=hidden]),textarea').forEach(el => {
+    if ((el.labels && el.labels.length) || el.getAttribute('aria-label') || el.getAttribute('aria-labelledby')) return;
+    let t = '', box = el.closest('.field,label,td,th,.panel-h,div');
+    const lab = box && [...box.querySelectorAll('label,.f,.l,.kicker,b,h2')].find(x => !x.contains(el) && x.textContent.trim());
+    if (lab) t = lab.textContent;
+    for (let p = el.previousElementSibling; !t && p; p = p.previousElementSibling) t = p.textContent;
+    t = (t || el.title || el.placeholder || el.dataset.f || el.dataset.v || el.name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (t) el.setAttribute('aria-label', t);
+  });
+  root.querySelectorAll('.tw,#gwrap,.chart-scroll,.spk-l').forEach(el => {
+    if (el.hasAttribute('tabindex')) return;
+    el.tabIndex = 0; if (!el.getAttribute('role')) el.setAttribute('role', 'region');
+    if (!el.getAttribute('aria-label')) el.setAttribute('aria-label', ((el.closest('section') || el).querySelector('h2,h1')?.textContent || 'Scrollable table').trim().slice(0, 60));
+  });
+}
 function render() {
   W.refreshFloor(); Object.entries(OPS.hourlyReferences).forEach(([k,n])=>{if(W.LOB[k])W.LOB[k].minInt=n;});
   const previousTimeline=$('gwrap'),timelinePosition=previousTimeline?{left:previousTimeline.scrollLeft,top:previousTimeline.scrollTop,day:previousTimeline.dataset.day,scope:previousTimeline.dataset.scope}:null;
@@ -2505,6 +2534,8 @@ function render() {
   if (isPhone()) { $('root').innerHTML = phoneBlock(); return; }
   document.documentElement.dataset.acc = S.auth ? S.acc : 'all';   // glass ground takes the selected account's colour
   $('root').innerHTML = S.auth ? shell() : signin();
+  a11yPass($('root'));
+  if (!window.__a11yObs) { let q = 0; window.__a11yObs = new MutationObserver(() => { if (q) return; q = requestAnimationFrame(() => { q = 0; a11yPass(document.body); }); }); window.__a11yObs.observe(document.body, { childList:true, subtree:true }); }   // drawers, menus and table wrappers added after render
   if(document.querySelector('.spk-l')) document.querySelector('.spk-l').scrollTop=pickerScroll;
   // any table that isn't already inside a scroller gets one, so wide tables scroll inside their panel
   document.querySelectorAll('#root main table').forEach(t => {
@@ -2737,7 +2768,7 @@ function shell() {
   const pend = W.REQ.filter(r => r.status === 'Pending' && accOk(W.AGI[r.agent])).length, swp = W.SWAPS.filter(x => x.status === 'Pending approval' && swOk(x)).length, inn = myInactive().filter(x => x.futureShifts > 0).length;
   const accs = W.ACCOUNTS.filter(a => inScope(a.id)), chips = (W.ME.scope.includes('all') ? [['all','All accounts']] : []).concat(accs.map(a => [a.id, a.name]));
   const btn = ([k, l]) => `<button class="nav ${S.page === k ? 'on' : ''}" data-a="go" data-v="${k}" title="${l}" ${S.page === k ? 'aria-current="page"' : ''}>${icon(k)}<span>${l}</span>${k === 'requests' && pend ? `<span class="cnt">${pend}</span>` : ''}${k === 'swaps' && swp ? `<span class="cnt">${swp}</span>` : ''}${k === 'inactive' && inn ? `<span class="cnt" style="background:var(--bad)">${inn}</span>` : ''}</button>`;
-  return `<div class="app ${S.rail ? 'rail' : ''}">
+  return `<a class="skip" href="#main">Skip to content</a><div class="app ${S.rail ? 'rail' : ''}">
     <nav class="side" aria-label="Main"><div class="si-logo">${MARK} <span>Workforce Tool</span></div>
       ${NAV.map(([sec, items]) => { const v = items.filter(([k]) => canSee(k)); if (!v.length) return ''; const col = S.navCol[sec] && !S.rail;
         return `<button class="navsec ${col ? 'col' : ''}" data-a="navSec" data-v="${sec}" aria-expanded="${!col}"><span>${sec}</span><i class="car">▾</i></button>` + `<div class="navitems" ${col?'hidden':''}>${v.map(btn).join('')}</div>`; }).join('')}
@@ -2749,7 +2780,7 @@ function shell() {
         <span class="sp"></span><span id="syncPill">${syncPill()}</span>
         <button class="btn sm" data-a="pageHelp" aria-label="Help with this page"><span class="hl">Help with this page</span><span class="hs">Help</span></button><button class="btn sm ghost" data-a="theme" aria-label="Switch theme">◐</button>
         <span class="user" title="${esc(W.ME.name)} · ${esc(W.ME.role)}"><span class="av">${initials(W.ME.name)}</span><span class="un">${esc(W.ME.name.split(' ')[0] === W.ME.name ? W.ME.name : W.ME.name)}<small>${esc(W.ME.role)}</small></span></span><button class="btn sm ghost" data-a="logout" title="Sign out" aria-label="Sign out">Sign out</button></div>
-      <main id="main">${pageIntro()}${cacheNotice()}${loadingNote()}${['live','overview'].includes(S.page) ? timeZonePanel() : ''}${loadingGate() || ({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
+      <main id="main" tabindex="-1">${pageIntro()}${cacheNotice()}${loadingNote()}${['live','overview'].includes(S.page) ? timeZonePanel() : ''}${loadingGate() || ({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
     </div></div>`;
 }
 
@@ -3885,7 +3916,23 @@ function accountsTab() {
       <td>${ed ? `<button class="btn sm bad" data-a="accRemove" data-v="${a.id}">Remove</button>` : ''}</td></tr>`; }).join('')}</tbody></table></section>
   ${W.ARCHIVE.length ? `<section class="panel" style="margin-top:14px"><h2 style="margin-bottom:8px">Removed accounts</h2><table><thead><tr><th>Account</th><th>Removed</th><th>By</th><th>Reason</th><th class="n">People</th><th></th></tr></thead><tbody>
     ${W.ARCHIVE.map(b => `<tr><td class="nm">${esc(b.acc.name)}</td><td class="num">${esc(b.at)}</td><td>${esc(b.by)}</td><td class="meta">${esc(b.why || '—')}</td><td class="n">${b.agents.length}</td><td>${ed ? `<button class="btn sm ok" data-a="accRestore" data-v="${b.acc.id}">Restore</button>` : ''}</td></tr>`).join('')}</tbody></table></section>` : ''}
-  <section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Shifts teams you're a member of</h2><p class="sub">Add a team as an account: its scheduling groups become stations until the roster gives locations and stations.</p></div></div>
+  ${DEV ? sampleAccountSetup(ed) : addAccountForm(ed)}`;
+}
+/* Add an account from Teams Shifts (live, 2026-11-13): paste the team link → Check team (read through the Shifts reader) → Add account
+   saves it in wft_accounts, adds it to the reader list (publishing stays off) and sets its time zone. Nothing is hard-coded any more. */
+function addAccountForm(ed) {
+  if (!ed) return '';
+  const n = S.na || {}, v = k => esc(n[k] || '');
+  return `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Add an account from Teams Shifts</h2><p class="sub">Paste the team link (Teams → the team → ⋯ → Get link to team). The tool checks the team, saves the account and starts reading its schedules. Publishing to Shifts stays off until you switch it on in Connected services.</p></div></div>
+    <div class="cols c2"><div class="field"><label class="f" for="naLink">Shifts team link or team ID</label><input class="in mono" id="naLink" data-na="link" placeholder="https://teams.microsoft.com/l/team/…?groupId=…" value="${v('link')}"></div>
+      <div class="field"><label class="f" for="naName">Account name</label><input class="in" id="naName" data-na="name" placeholder="e.g. Acme Logistics" value="${v('name')}"></div></div>
+    <div class="cols c2"><div class="field"><label class="f" for="naSite">Main location</label><select class="in" id="naSite" data-na="site" style="width:100%">${Object.entries(W.LOCNAME).map(([k, l]) => `<option value="${k}" ${(n.site || 'BAQ') === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+      <div class="field"><label class="f" for="naTz">Shifts team time zone</label><select class="in" id="naTz" data-na="tz" style="width:100%">${W.TZ_CHOICES.map(([z, l]) => `<option value="${z}" ${(n.tz || 'America/Bogota') === z ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div></div>
+    ${n.check ? `<div class="note ${n.check.ok ? '' : 'bad'}" role="status" style="margin-bottom:10px">${esc(n.check.msg)}</div>` : ''}
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-a="naCheck" ${n.busy ? 'disabled' : ''}>Check team</button><button class="btn pri" data-a="naAdd" ${n.check && n.check.ok && !n.busy ? '' : 'disabled'}>Add account</button></div></section>`;
+}
+function sampleAccountSetup(ed) {
+  return `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Shifts teams you're a member of</h2><p class="sub">Add a team as an account: its scheduling groups become stations until the roster gives locations and stations.</p></div></div>
     <table><thead><tr><th>Shifts team</th><th>Site</th><th class="n">Members</th><th>Scheduling groups</th><th>Status</th><th></th></tr></thead><tbody>
     ${W.SHIFTS_TEAMS.map((t, i) => { const arch = W.ARCHIVE.find(b => b.acc.team === t.team);
       return `<tr><td class="nm">${esc(t.team)}</td><td>${esc(t.site)}</td><td class="n">${t.members}</td><td>${t.groups.map(esc).join(', ')}</td>
@@ -3913,8 +3960,8 @@ function inactiveTab() {
       <td class="n">${x.futureShifts ? `<span class="pill bad">${x.futureShifts}</span>` : x.cleared ? '<span class="pill ok">Removed</span>' : '0'}</td>
       <td class="nowrap">${ed && x.futureShifts && x.a.tlAsked ? '<span class="pill info">TL asked</span> ' : ''}${ed && x.futureShifts ? `<button class="btn sm bad" data-a="inClear" data-v="${x.a.id}">Remove future shifts</button> ` : ''}${isTL() && x.futureShifts ? (x.a.tlAsked ? '<span class="pill info">WFM asked</span>' : `<button class="btn sm" data-a="inAsk" data-v="${x.a.id}">Ask WFM to remove</button>`) : ''}${isAdmin() ? `<button class="btn sm" data-a="inReact" data-v="${x.a.id}">Reactivate</button>` : ''}</td></tr>`).join('') || `<tr><td colspan="6"><div class="empty">${isTL() ? 'Nobody on your team is inactive.' : 'Nobody is inactive.'}</div></td></tr>`}</tbody></table></div></section>
   ${isAdmin() ? `<section class="panel" style="margin-top:14px"><h2 style="margin-bottom:8px">Mark someone inactive</h2><p class="sub" style="margin-bottom:10px">For a resignation or long leave before the roster catches up. The master roster sync also does this automatically for anyone Termed.</p>
-    <div style="display:grid;grid-template-columns:2fr 1.4fr auto;gap:8px"><select class="in" id="inWho" style="width:100%">${act.map(a => `<option value="${a.id}">${esc(a.name)} · ${esc(a.lob)}</option>`).join('')}</select>
-      <select class="in" id="inWhy" style="width:100%">${['Resigned','Terminated','End of contract','Transferred to another account','Long-term leave'].map(x => `<option>${x}</option>`).join('')}</select><button class="btn bad" data-a="inMark">Mark inactive</button></div></section>` : ''}`;
+    <div style="display:grid;grid-template-columns:2fr 1.4fr auto;gap:8px"><select class="in" id="inWho" style="width:100%" aria-label="Person to mark inactive">${act.map(a => `<option value="${a.id}">${esc(a.name)} · ${esc(a.lob)}</option>`).join('')}</select>
+      <select class="in" id="inWhy" style="width:100%" aria-label="Reason">${['Resigned','Terminated','End of contract','Transferred to another account','Long-term leave'].map(x => `<option>${x}</option>`).join('')}</select><button class="btn bad" data-a="inMark">Mark inactive</button></div></section>` : ''}`;
 }
 
 /* ---------- pattern builder by start / end time ---------- */
@@ -4037,12 +4084,37 @@ async function dbAfterSignIn() {
   await dbLoadAudit(); if (p.role === 'Admin') await dbLoadUsers(); render();
 }
 /* live data: the portal's synced Crane roster, Shifts schedules and requests, plus the tool's own saved work */
+/* accounts saved in the database (wft_accounts) — added from the Accounts tab — are created on sign-in; archived ones are removed */
+async function dbLoadAccounts() {
+  const r = await DB.sb.from('wft_accounts').select('id,name,site,team_name,team_id,abs_target,adh_target,archived'); if (r.error) { console.warn('accounts', r.error.message); return; }
+  (r.data || []).forEach(x => {
+    if (x.archived) { if (W.ACC[x.id] && !W.ARCHIVE.some(b => b.acc.id === x.id)) W.removeAccount(x.id, 'Archived'); return; }
+    if (W.ACC[x.id] || !x.team_id) return;
+    W.addAccount({ id:x.id, name:x.name, site:x.site || 'BAQ', team:x.team_name || x.name, teamId:x.team_id, lobs:[], absTarget:+x.abs_target || 7, adhTarget:+x.adh_target || 95 });
+  });
+}
+/* reader list in wft_settings 'pilot': read = accounts loaded straight from Shifts; accounts = accounts that publish */
+async function dbSetReading(id, on) {
+  const cur = await DB.sb.from('wft_settings').select('value').eq('key', 'pilot').maybeSingle(); if (cur.error) throw cur.error;
+  const P = { ...((cur.data && cur.data.value) || {}) };
+  P.read = on ? [...new Set([...(P.read || []), id])] : (P.read || []).filter(x => x !== id);
+  if (!on) P.accounts = (P.accounts || []).filter(x => x !== id);
+  if (on && W.ACC[id]) P.site = { ...(P.site || {}), [id]:W.LOCNAME[W.ACC[id].site] || W.ACC[id].site };
+  const { error } = await DB.sb.from('wft_settings').upsert({ key:'pilot', value:P, updated_by:W.ME.name, updated_at:new Date().toISOString() }); if (error) throw error;
+  CONN.pilot = P;
+}
+async function dbArchiveAccount(id, archived) {
+  if (!DB.on || !isAdmin()) return;
+  try { const { error } = await DB.sb.from('wft_accounts').update({ archived, updated_at:new Date().toISOString() }).eq('id', id); if (error) throw error; await dbSetReading(id, !archived); }
+  catch (e) { toast('Saved here, but not in the database: ' + e.message); }
+}
 async function dbLoadLive(p) {
   const canCrane = p.scope.includes('all') || p.scope.includes('CRN');
   DB.mute = true;                                   // loading creates shift templates; don't write those to the audit trail
   const { data:L, error } = canCrane&&!CONN.standalone ? await DB.sb.rpc('wft_crane_live') : {data:{roster:[],sched:[],base:[],requests:[]},error:null};
   if (error || !L) { DB.mute = false; DB.liveErr = error ? error.message : 'No data'; W.loadLive('CRN', { roster:[], sched:[], base:[], requests:[] }); return; }
   W.loadLive('CRN', L); W.AUD.length = 0;
+  await dbLoadAccounts();
   const st = await DB.sb.from('wft_settings').select('key,value').in('key', ['flowUrl']);
   (st.data || []).forEach(x => { if (x.key === 'flowUrl' && x.value && x.value.url) CONN.flowUrl = x.value.url; });
   /* standalone: Crane's schedule, change history and clock-ins are read per account by dbRestoreTeam after sign-in; reading them here
@@ -4651,14 +4723,36 @@ function dbStatusPanel() {
       <tr><td>Saving</td><td>${n ? `<span class="pill ${DB.offline ? 'bad' : 'warn'}"><i></i>${n} change${n === 1 ? '' : 's'} waiting${DB.offline ? ' · offline' : ''}</span>` : '<span class="pill ok"><i></i>All changes saved</span>'}</td></tr></tbody></table>
     <p class="foot-note">Changes are saved as you work. If the connection drops they wait on this computer and are sent when it is back. The daily backup is in Automatic backup below.</p></section>`;
 }
+/* Connected services at a glance (2026-11-13): one row per connection, OK / warning / broken, with the one thing to do when it isn't OK */
+async function loadFeedStatus() {
+  if (!DB.on || (DB.feedAt && Date.now() - DB.feedAt < 60000)) return; DB.feedAt = Date.now();
+  const r = await DB.sb.from('wft_shifts_feed').select('account_id,ok,read_at,error,secs'); DB.feedRows = r.error ? null : (r.data || []); DB.feedErr = r.error ? r.error.message : ''; render();
+}
+function connStatusPanel() {
+  setTimeout(loadFeedStatus, 0);
+  const C = CONN, P = C.pilot || {}, T = DB.teams || {}, accs = readAccs(), ago = t => { const m = Math.round((Date.now() - Date.parse(t)) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.round(m / 60) + ' h ago'; };
+  const pill = st => `<span class="pill ${({ ok:'ok', warn:'warn', bad:'bad', off:'muted' })[st]}"><i></i>${({ ok:'OK', warn:'Check', bad:'Broken', off:'Off' })[st]}</span>`;
+  const okRead = accs.filter(a => (T[a] || {}).st === 'ok'), failRead = accs.filter(a => (T[a] || {}).st === 'failed');
+  const feed = DB.feedRows || [], fresh = feed.filter(f => f.ok && Date.now() - Date.parse(f.read_at) < 60 * 60000), feedMissing = accs.filter(a => !feed.some(f => f.account_id === a));
+  const rows = [
+    ['Database', DB.on ? 'ok' : 'bad', DB.on ? 'Signed in to the Workforce Tool database.' : 'Not connected. Sign in again; if it persists, check the database link below.'],
+    ['Reading from Shifts (reader flow)', !C.readUrl ? 'bad' : failRead.length ? 'bad' : 'ok', !C.readUrl ? 'No reader link. Paste it in Receiving from Shifts below.' : `${accs.length} account${accs.length === 1 ? '' : 's'} read from Shifts${okRead.length < accs.length ? ` · ${okRead.length} loaded so far` : ''}${failRead.length ? ' · failed: ' + failRead.map(a => W.ACC[a].name + ' (' + ((T[a] || {}).why || '') + ')').join(', ') : ''}.`],
+    ['Server feed (Supabase, every 30 min)', DB.feedRows === undefined ? 'warn' : !feed.length ? 'warn' : feed.some(f => !f.ok) || fresh.length < feed.length || feedMissing.length ? 'warn' : 'ok',
+      DB.feedRows === undefined ? 'Checking…' : DB.feedErr ? 'Not readable: ' + DB.feedErr : feed.map(f => `${(W.ACC[f.account_id] || { name:f.account_id }).name} ${f.ok ? ago(f.read_at) : 'failed: ' + (f.error || '')}`).join(' · ') + (feedMissing.length ? ' · not read yet: ' + feedMissing.map(a => W.ACC[a].name).join(', ') + ' (new accounts join the next round)' : '')],
+    ['Publishing to Shifts', !C.pubUrl ? 'bad' : (P.accounts || []).length ? 'ok' : 'off', !C.pubUrl ? 'No publishing link. Paste it in Sending to Shifts below.' : (P.accounts || []).length ? 'Publishes for ' + P.accounts.map(a => (W.ACC[a] || { name:a }).name).join(', ') + (P.mode === 'dry' ? ' (preview only)' : '') + '.' : 'Link set, but no account publishes yet. Tick accounts in the controls below.'],
+    ['Time off to Shifts (PTO flow)', C.flowUrl ? 'ok' : 'warn', C.flowUrl ? 'Approved leave is sent to Shifts.' : 'No PTO flow link: leave stays in the tool only.'],
+  ];
+  return `<section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>Status at a glance</h2><p class="sub">Everything below is set up once. If a row isn't OK, its note says what to do.</p></div></div>
+    <table><tbody>${rows.map(([n, st, msg]) => `<tr><td class="nm" style="width:260px">${esc(n)}</td><td style="width:90px">${pill(st)}</td><td>${esc(msg)}</td></tr>`).join('')}</tbody></table></section>`;
+}
 function pConnect() {
   const C = CONN, ed = isAdmin(), dt = C.dbTest, ft = C.flowTest;
   return `<div class="head"><div class="grow"><div class="kicker">Where the data comes from and where it goes</div><h1><b>Connections</b></h1><p class="sub">Same set-up as your live PTO portal: one Supabase database plus Power Automate flows into and out of Microsoft Shifts and Teams. Values are saved in this browser; the database key is the public (anon) key, and access is protected by database rules, not by hiding it.</p></div></div>
-  <section class="panel" style="margin-bottom:14px">${flowDiagram()}</section>
+  ${connStatusPanel()}
   <div class="cols c2">
     ${C.standalone ? `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">The Shifts reader below reads team members, schedules, time off and time-off requests. The tool reads when you sign in; schedules and requests refresh every minute while their page is open.</p></div></div><p class="note">Use <b>Refresh Teams requests</b> on Review leave requests for an immediate check. Its status shows the last request read or an error. Shift swap requests are not connected yet.</p><button class="btn" data-a="reqRefresh" ${scheduleReadBusy ? 'disabled' : ''}>Refresh Teams requests</button></section>` : `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div class="grow"><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">Flow <b>“Crane Shifts → PTO sync”</b> runs by itself every hour. It reads Shifts and writes into the database; the tool reads the database.</p></div>${dt && dt.sync ? `<span class="pill ok"><i></i>Last sync ${esc(dt.sync.split(' · ')[0])}</span>` : '<span class="pill muted">Last sync: test the database</span>'}</div>
       <div class="note" style="margin-bottom:10px"><b>No link is needed here for the hourly sync.</b> The link goes the other way, inside the flow: its HTTP step posts to the database address below, with the anon key in the headers (as the live portal does today).</div>
-      <div class="field"><label class="f">Database address used by the flow</label><div style="display:flex;gap:6px"><input class="in mono" readonly value="${esc(C.dbUrl.replace(/\/+$/, ''))}/rest/v1/rpc/crane_pto_ingest_shifts"><button class="btn sm" data-a="cCopyIn">Copy</button></div></div>
+      <div class="field"><label class="f">Database address used by the flow</label><div style="display:flex;gap:6px"><input class="in mono" readonly aria-label="Database address used by the flow" value="${esc(C.dbUrl.replace(/\/+$/, ''))}/rest/v1/rpc/crane_pto_ingest_shifts"><button class="btn sm" data-a="cCopyIn">Copy</button></div></div>
       <div class="field"><label class="f" for="cIn">Sync-now trigger URL (optional)</label><input class="in mono" id="cIn" value="${esc(C.inUrl)}" placeholder="Only if the sync flow also has a “When an HTTP request is received” trigger" ${ed ? '' : 'disabled'}></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-a="cInSave" ${ed ? '' : 'disabled'}>Save</button><button class="btn pri" data-a="cInSync" ${ed && C.inUrl ? '' : 'disabled'}>Sync now</button></div>
       ${C.inTest ? `<div class="note ${C.inTest.ok ? '' : 'bad'}" style="margin-top:10px">${esc(C.inTest.msg)} · ${esc(C.inTest.at)}</div>` : ''}
@@ -4684,6 +4778,20 @@ function pConnect() {
       <li><b>Sending</b> happens when you approve or publish: tool → flow trigger URL → Shifts.</li>
       <li>The next receiving run reads Shifts back, so the tool and Shifts stay in step. A change made directly in Shifts also comes back on the next run.</li>
       <li>Optional: add an HTTP trigger to the receiving flow and paste it in ① for a <b>Sync now</b> button.</li></ol></section></div>
+  ${ed && (DB.on || DEV) ? `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Shifts reader &amp; publishing controls</h2><p class="sub">Links are stored in the database for signed-in staff only, never in the public files. Publishing writes real shifts to Microsoft Shifts, but only for the accounts enabled for publishing ticked here.</p></div></div>
+${DB.on ? '' : '<div class="note warn" style="margin-bottom:10px"><b>Local test mode:</b> this box is shown for review only. Nothing here is saved or sent.</div>'}
+    <div class="cols c2"><div class="field"><label class="f" for="cRead">Reader flow link ("Workforce Tool from Shifts - read team v2")</label><input class="in mono" id="cRead" style="width:100%" placeholder="https://…/triggers/manual/paths/invoke?…" value="${CONN.readUrl ? '•••• saved ••••' : ''}"></div>
+      <div class="field"><label class="f" for="cPub">Publish flow link ("Workforce Tool to Shifts - publish shifts v2")</label><input class="in mono" id="cPub" style="width:100%" placeholder="https://…/triggers/manual/paths/invoke?…" value="${CONN.pubUrl ? '•••• saved ••••' : ''}"></div></div>
+    <div class="field"><label class="f">Read from Shifts (people, stations and schedules)</label>${W.ACCOUNTS.map(a => { const on = (CONN.standalone || a.id !== 'CRN') && pilDraft().read.includes(a.id), t = (DB.teams || {})[a.id];
+        return `<label style="display:inline-flex;gap:6px;margin-right:16px;align-items:center"><input type="checkbox" data-f="pilRead" value="${a.id}" ${on ? 'checked' : ''} ${a.id === 'CRN'&&!CONN.standalone ? 'disabled' : ''}> ${esc(a.name)}${a.id === 'CRN'&&!CONN.standalone ? ' <span class="meta">(portal feed)</span>' : t ? ` <span class="pill ${t.st === 'ok' ? 'ok' : t.st === 'failed' ? 'bad' : 'info'}">${t.st === 'ok' ? `${t.people} people · ${t.stations} stations` : t.st === 'failed' ? 'Failed' : 'Loading…'}</span>` : ''}</label>`; }).join('')}
+      <p class="foot-note">Reading never changes Shifts. A ticked account loads its people from its Shifts team at sign-in (in the background), so its team mapping row gets people and its schedules show in the tool. Publishing is separate, below.</p></div>
+    <div class="field"><label class="f">Accounts allowed to send schedules</label>${W.ACCOUNTS.map(a => `<label style="display:inline-flex;gap:6px;margin-right:16px"><input type="checkbox" class="cPilot" data-f="pilAcc" value="${a.id}" ${pilDraft().accounts.includes(a.id) ? 'checked' : ''}> ${esc(a.name)}</label>`).join('')}
+      ${pilDraft().accounts.map(id => pilotRow(id)).join('')}
+      <p class="foot-note">New accounts appear here after being added, but must be selected and configured before any live sending. Selected accounts are read from and published to Shifts in their account time zone (Settings → Account time zones). Everything else stays "Not sent" until it's ticked here. Use the v2 publish flow: it replaces overnight shifts and duplicates correctly.</p></div>
+    <div style="display:flex;justify-content:flex-end"><button class="btn pri" data-a="cPilotSave">Save</button></div></section>` : ''}
+  ${teamMapPanel(ed)}
+  <details class="adv"><summary>Advanced setup · diagram, snapshot, backup, exports, attendance files, flow reference</summary>
+  <section class="panel" style="margin-bottom:14px">${flowDiagram()}</section>
   ${DB.on?`<section class="panel"><h2>Shared Teams snapshot</h2><p>${DB.cacheError?'Snapshot unavailable: '+esc(DB.cacheError)+'. Apply teams-cache-setup.sql in this Workforce Tool project.':DB.cacheSavedAt?'Last saved '+esc(new Date(DB.cacheSavedAt).toLocaleString()):'Waiting for the first complete Teams read.'}</p><p class="meta">Schedules, native activities, rest/leave, members, groups, reason definitions and received requests are cached by account. Saved tool edits and clock-ins load separately. Refresh failures retain the snapshot with its capture time.</p></section>`:''}
   ${isAdmin() && DB.on ? backupPanel() : ''}
   ${ed && (DB.on || DEV) ? `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Data export · SharePoint / Power BI</h2><p class="sub">Everything that happens in the tool, as one row per person per day: plan vs current schedule (with the change, its reason and who made it), absences (planned / unplanned), scheduled vs logged minutes, late, early out, no-show, ETA. Plus the raw records. For backup and for BI (daily, weekly, monthly).</p></div><button class="btn sm" data-a="factsCsv">Download CSV now</button></div>
@@ -4705,22 +4813,10 @@ ${DB.on ? '' : '<div class="note warn" style="margin-bottom:10px"><b>Local test 
     ${(DB.drops || []).map(x => { const r = x.result || {}; return `<tr><td class="nm">${esc(x.name)}<div class="meta">${x.size_bytes ? Math.round(x.size_bytes / 1024) + ' KB' : ''}</div></td><td>${esc((W.ACC[x.account_id] || {}).name || x.account_id)}</td><td class="num">${esc(String(x.received_at || '').slice(0, 16).replace('T', ' '))}</td>
       <td class="num">${x.processed_at ? esc(String(x.processed_at).slice(0, 16).replace('T', ' ')) + `<div class="meta">${esc(x.processed_by || '')}</div>` : '<span class="pill warn"><i></i>Waiting</span>'}</td>
       <td>${!x.processed_at ? '<span class="meta">Imported when an Admin or RTA opens the tool</span>' : r.ok ? `<span class="pill ok"><i></i>${(r.clockins || 0).toLocaleString()} clock-ins</span><div class="meta">${r.people || 0} people · ${esc(r.from || '')} → ${esc(r.to || '')}${r.unmatched ? ` · ${r.unmatched} names not matched` : ''}</div>` : `<span class="pill bad"><i></i>Failed</span><div class="meta">${esc(r.error || '')}</div>`}</td></tr>`; }).join('') || '<tr><td colspan="5"><div class="empty">No files received yet.</div></td></tr>'}</tbody></table></section>` : ''}
-  ${ed && (DB.on || DEV) ? `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Shifts reader &amp; publishing controls</h2><p class="sub">Links are stored in the database for signed-in staff only, never in the public files. Publishing writes real shifts to Microsoft Shifts, but only for the accounts enabled for publishing ticked here.</p></div></div>
-${DB.on ? '' : '<div class="note warn" style="margin-bottom:10px"><b>Local test mode:</b> this box is shown for review only. Nothing here is saved or sent.</div>'}
-    <div class="cols c2"><div class="field"><label class="f" for="cRead">Reader flow link ("Workforce Tool from Shifts - read team v2")</label><input class="in mono" id="cRead" style="width:100%" placeholder="https://…/triggers/manual/paths/invoke?…" value="${CONN.readUrl ? '•••• saved ••••' : ''}"></div>
-      <div class="field"><label class="f" for="cPub">Publish flow link ("Workforce Tool to Shifts - publish shifts v2")</label><input class="in mono" id="cPub" style="width:100%" placeholder="https://…/triggers/manual/paths/invoke?…" value="${CONN.pubUrl ? '•••• saved ••••' : ''}"></div></div>
-    <div class="field"><label class="f">Read from Shifts (people, stations and schedules)</label>${W.ACCOUNTS.map(a => { const on = (CONN.standalone || a.id !== 'CRN') && pilDraft().read.includes(a.id), t = (DB.teams || {})[a.id];
-        return `<label style="display:inline-flex;gap:6px;margin-right:16px;align-items:center"><input type="checkbox" data-f="pilRead" value="${a.id}" ${on ? 'checked' : ''} ${a.id === 'CRN'&&!CONN.standalone ? 'disabled' : ''}> ${esc(a.name)}${a.id === 'CRN'&&!CONN.standalone ? ' <span class="meta">(portal feed)</span>' : t ? ` <span class="pill ${t.st === 'ok' ? 'ok' : t.st === 'failed' ? 'bad' : 'info'}">${t.st === 'ok' ? `${t.people} people · ${t.stations} stations` : t.st === 'failed' ? 'Failed' : 'Loading…'}</span>` : ''}</label>`; }).join('')}
-      <p class="foot-note">Reading never changes Shifts. A ticked account loads its people from its Shifts team at sign-in (in the background), so its team mapping row gets people and its schedules show in the tool. Publishing is separate, below.</p></div>
-    <div class="field"><label class="f">Accounts allowed to send schedules</label>${W.ACCOUNTS.map(a => `<label style="display:inline-flex;gap:6px;margin-right:16px"><input type="checkbox" class="cPilot" data-f="pilAcc" value="${a.id}" ${pilDraft().accounts.includes(a.id) ? 'checked' : ''}> ${esc(a.name)}</label>`).join('')}
-      ${pilDraft().accounts.map(id => pilotRow(id)).join('')}
-      <p class="foot-note">New accounts appear here after being added, but must be selected and configured before any live sending. Selected accounts are read from and published to Shifts in their account time zone (Settings → Account time zones). Everything else stays "Not sent" until it's ticked here. Use the v2 publish flow: it replaces overnight shifts and duplicates correctly.</p></div>
-    <div style="display:flex;justify-content:flex-end"><button class="btn pri" data-a="cPilotSave">Save</button></div></section>` : ''}
-  ${teamMapPanel(ed)}
   <div class="stack" style="margin-top:14px">
     <section class="panel"><h2 style="margin-bottom:8px">Feeds coming in</h2><div class="tw"><table class="conn-t"><thead><tr><th>Feed</th><th>When</th><th>Brings</th><th>Status</th></tr></thead><tbody>${IN_FEEDS.map(f => `<tr><td class="nm">${f[0]}</td><td class="nowrap">${f[1]}</td><td><div>${f[2]}</div><div class="meta mono">${f[3]}</div></td><td><span class="pill ${f[4].startsWith('Live') ? 'ok' : ['To add','Manual upload','File found'].includes(f[4]) ? 'info' : 'warn'}">${f[4]}</span></td></tr>`).join('')}</tbody></table></div></section>
     <section class="panel"><h2 style="margin-bottom:8px">Actions going out (flow <span class="mono">action</span>)</h2><div class="tw"><table class="conn-t"><thead><tr><th>action</th><th>What it does</th><th>Shifts / Teams step</th><th>Status</th></tr></thead><tbody>${FLOW_ACTIONS.map(f => `<tr><td class="mono">${f[0]}</td><td>${f[1]}</td><td class="meta">${f[3]}</td><td><span class="pill ${f[2] === 'Live' ? 'ok' : 'info'}">${f[2]}</span></td></tr>`).join('')}</tbody></table></div>
-      <p class="foot-note">“To add” = new branches in the same flow's Switch on <span class="mono">action</span>, following the pattern of the live ones.</p></section></div>`;
+      <p class="foot-note">“To add” = new branches in the same flow's Switch on <span class="mono">action</span>, following the pattern of the live ones.</p></section></div></details>`;
 }
 async function testDb() {
   const u = CONN.dbUrl.replace(/\/+$/, ''), h = { apikey:CONN.dbKey, Authorization:'Bearer ' + CONN.dbKey };
@@ -4826,7 +4922,7 @@ function readLogins(f) {
 const B = { view:'day', gday:addD(TODAY, 1), tz:0, tags:{}, spans:{}, brk:{}, from:addD(weekStart(TODAY), 7), len:7, lobs:[], tool:null, draft:{}, swp:{}, sw:null, undo:[], redo:[], sel:new Set(), clip:null, q:'', day:null, paint:null, newT:false };
 function gScroll() { const w = $('gwrap'); if (!w) return; const ags = bAgents(), st = ags.map(a => bCode(a, B.gday)).filter(c => c !== 'OFF').map(c => W.SHIFTS[c].s); if (st.length) w.scrollLeft = Math.max(0, gX(Math.min(...st)) - 60); }
 const shiftHue = c => { const m = W.SHIFTS[c].s % 1440; return m < 420 ? 185 : m < 570 ? 215 : m < 720 ? 245 : m < 1020 ? 275 : 230; };
-const chipStyle = c => c === 'OFF' ? 'background:transparent;color:var(--ink3);box-shadow:inset 0 0 0 1px var(--line2)' : `background:hsl(${shiftHue(c)} 58% ${W.SHIFTS[c].s % 1440 >= 1260 || W.SHIFTS[c].s % 1440 < 300 ? 30 : 42}%);color:#fff`;
+const chipStyle = c => c === 'OFF' ? 'background:transparent;color:var(--ink3);box-shadow:inset 0 0 0 1px var(--line2)' : `background:hsl(${shiftHue(c)} 58% ${W.SHIFTS[c].s % 1440 >= 1260 || W.SHIFTS[c].s % 1440 < 300 ? 20 : 28}%);color:#fff`   /* ≥4.5:1 white text for every hue (yellow at 42% was 3.2:1) */;
 const bDays = () => range(B.from, addD(B.from, B.len - 1));
 const bAgents = () => { const ks = new Set(B.lobs), q = B.q.toLowerCase(), l = W.AG.filter(a => ks.has(a.key) && !a.inactive && (!q || a.name.toLowerCase().includes(q)));
   return ks.size > 1 ? l.sort((x, y) => lobName(x.key).localeCompare(lobName(y.key)) || x.name.localeCompare(y.name)) : l; };
@@ -5232,6 +5328,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Enter') { e.preventDefault(); cmdGo(CMD.i); }
 });
 document.addEventListener('input', e => { if (e.target.id === 'cmdQ') { CMD.i = 0; cmdRender(); } });
+['input','change'].forEach(t => document.addEventListener(t, e => { const k = e.target.dataset && e.target.dataset.na; if (k) { S.na = { ...(S.na || {}), [k]:e.target.value }; if (k === 'link') delete S.na.check; } }));   // Add account form
 /* ---------- drawer ---------- */
 let opener = null;
 function open(t, b, f) { opener = document.activeElement; $('drT').innerHTML = t; $('drB').innerHTML = b; $('drF').innerHTML = f || ''; $('drawer').classList.add('on'); $('scrim').classList.add('on'); $('drawer').setAttribute('aria-hidden', 'false'); setTimeout(() => { const x = $('drawer').querySelector('select,textarea,input,.btn.pri'); x && x.focus(); }, 40); }
@@ -5395,8 +5492,29 @@ const A = {
       <div class="field"><label class="f" for="arConf">Type the account name to confirm</label><input class="in" id="arConf" placeholder="${esc(a.name)}"></div>`,
       `<button class="btn" data-a="close">Cancel</button><button class="btn bad" data-a="accRemoveGo" data-v="${a.id}">Remove account</button>`); },
   accRemoveGo: el => { const a = W.ACC[el.dataset.v]; if ($('arConf').value.trim().toLowerCase() !== a.name.toLowerCase()) { $('arConf').focus(); return toast('Type the account name exactly to confirm'); }
-    W.removeAccount(a.id, $('arWhy').value.trim()); if (S.acc === a.id) S.acc = 'all'; close(); toast(`${a.name} removed · archived, can be restored`); render(); },
-  accRestore: el => { W.restoreAccount(el.dataset.v); toast(`${W.ACC[el.dataset.v].name} restored`); render(); },
+    W.removeAccount(a.id, $('arWhy').value.trim()); dbArchiveAccount(a.id, true); if (S.acc === a.id) S.acc = 'all'; close(); toast(`${a.name} removed · archived, can be restored`); render(); },
+  accRestore: el => { W.restoreAccount(el.dataset.v); dbArchiveAccount(el.dataset.v, false); toast(`${W.ACC[el.dataset.v].name} restored`); render(); },
+  naCheck: async () => { const n = S.na = { ...(S.na || {}) }, id = W.parseTeamId(n.link || '');
+    const say = (ok, msg) => { S.na = { ...S.na, busy:false, check:{ ok, msg } }; render(); };
+    if (!id) return say(false, 'That isn\'t a team link or ID. In Teams: open the team → ⋯ → Get link to team, then paste it here.');
+    const dup = W.ACCOUNTS.find(a => a.teamId === id); if (dup) return say(false, `This team is already the account ${dup.name}.`);
+    if (!CONN.readUrl) return say(false, 'The Shifts reader isn\'t connected (Connected services → Receiving from Shifts).');
+    S.na = { ...n, teamId:id, busy:true, check:{ ok:false, msg:'Checking the team in Shifts… (up to a minute)' } }; render();
+    try { const iso = ms => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z'), now = Date.now();
+      const J = await readerCall({ action:'readteam', teamId:id, winFrom:iso(now - 864e5), winTo:iso(now + 7 * 864e5), names:true });
+      const g = (J.groups || []).filter(x => x.active !== false), m = (J.members || []).length;
+      if (!m) return say(false, 'The team was found but has no members the reader can see. Check that the reader account is a member of the team.');
+      say(true, `Found the team: ${m} members, ${g.length} scheduling group${g.length === 1 ? '' : 's'}${g.length ? ' (' + g.slice(0, 6).map(x => x.name).join(', ') + (g.length > 6 ? ', …' : '') + ')' : ''}, ${(J.shifts || []).length} shifts in the next 7 days.${n.name ? '' : ' Enter the account name, then Add account.'}`);
+    } catch (e) { say(false, 'Could not read that team: ' + e.message + '. Check that the reader account is a member of the team.'); } },
+  naAdd: async () => { const n = S.na || {}; if (!isAdmin() || !n.check || !n.check.ok) return; if (!(n.name || '').trim()) { $('naName').focus(); return toast('Enter the account name'); }
+    const name = n.name.trim(), base = (name.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || 'ACC').padEnd(3, 'X'); let id = base, i = 0;
+    while (W.ACC[id] || W.ARCHIVE.some(b => b.acc.id === id)) id = base.slice(0, 2) + String.fromCharCode(65 + (i++ % 26));
+    S.na = { ...n, busy:true, check:{ ok:true, msg:'Saving…' } }; render();
+    try { const { error } = await DB.sb.from('wft_accounts').insert({ id, name, site:n.site || 'BAQ', team_name:name, team_id:n.teamId, abs_target:7, adh_target:95 }); if (error) throw error;
+      W.addAccount({ id, name, site:n.site || 'BAQ', team:name, teamId:n.teamId, lobs:[], absTarget:7, adhTarget:95 });
+      W.setAccTz(id, n.tz || 'America/Bogota'); await dbSaveAccTz(); await dbSetReading(id, true);
+      S.na = null; toast(`${name} added · reading its Shifts team now`); render(); dbLoadTeams({ scope:[id] });
+    } catch (e) { S.na = { ...n, busy:false, check:{ ok:false, msg:'Not saved: ' + (e.message || e) } }; render(); } },
   pickLoc: el => { S.loc = el.dataset.v; W.setLoc(S.loc); render(); scrollTo(0, 0); },
   accGo: el => { S.acc = el.dataset.v; S.page = 'live'; render(); scrollTo(0, 0); },
   alertTL: el => { const a = W.AGI[el.dataset.id]; W.audit('Who is working now', 'Team lead alerted', a.name, '', a.tl, 'Not logged in · Teams message via Power Automate'); toast(`Teams alert sent to ${a.tl}`); },
