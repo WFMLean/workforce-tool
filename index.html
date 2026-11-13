@@ -2006,6 +2006,19 @@ function loadTeamSwaps(accId, J) {
   keep(SWAPS, x => !(x.teams && (ids.has(x.a) || ids.has(x.b))));
   SWAPS.push(...next); emit(); return { available:true, count:next.length, unmatched, outside };
 }
+/* Supabase Shifts feed (2026-11-13): the server reads Shifts every 30 min for yesterday → +20 days. For a fast start the feed replaces
+   that window of the saved snapshot (shifts/time off starting inside it); everything outside the window stays from the snapshot.
+   base = saved snapshot or null, F = feed payload. The live read that follows replaces all of it as before. */
+function feedMerge(base, F) {
+  const a = Date.parse(F.from), b = Date.parse(F.to), inside = x => { const t = Date.parse(x.start); return t >= a && t < b; };
+  const B = base || {}, seen = new Set(), keep = k => !seen.has(k) && seen.add(k), list = (x, y) => Array.isArray(x) && x.length ? x : (y || []);
+  return { ...B, ...F,
+    members:list(F.members, B.members), groups:list(F.groups, B.groups), reasons:list(F.reasons, B.reasons),
+    requests:Array.isArray(F.requests) ? F.requests : B.requests, swaps:Array.isArray(F.swaps) ? F.swaps : B.swaps, offers:Array.isArray(F.swaps) ? (F.offers || []) : B.offers,
+    shifts:[...(B.shifts || []).filter(x => !inside(x)), ...(F.shifts || [])].filter(x => keep('s' + (x.id || x.userId + x.start + x.end))),
+    timeOff:[...(B.timeOff || []).filter(x => !inside(x)), ...(F.timeOff || [])].filter(x => keep('t' + x.userId + x.start + x.end + (x.reasonId || ''))),
+    from:B.from && Date.parse(B.from) < a ? B.from : F.from, to:B.to && Date.parse(B.to) > b ? B.to : F.to, fromFeed:true };
+}
 /* what publishing sends: one request per run of consecutive days for one person (window = those site days, shifts in UTC) */
 function publishPayload(a, dates, teamId) {
   const ds = [].concat(dates).sort(), utc = (day, min) => new Date(toUtcMs(a.acc, day, min)).toISOString().replace(/\.\d+Z$/, 'Z');   // account (Shifts team) time zone, not the person's site
@@ -2415,7 +2428,7 @@ global.WF = {
   // utils
   pad, iso, parse, addD, diffD, dow, range, weekStart, hm, esc, fmtD, fmtS, DOW, pct, fmtPct, dur, initials, TODAY, hashKey,
   // data
-  kOf, loadTeamSwaps, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, shiftCoreSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, syncShiftsLeave, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
+  kOf, loadTeamSwaps, feedMerge, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, shiftCoreSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, syncShiftsLeave, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
   // logic
   get clock() { return WFc.clock; }, set clock(v) { WFc.clock = v; if (WFc.day === TODAY && Math.abs(v - realMin()) > 2) WFc.live = false; emit(); }, realMin,
   get floor() { return { day: WFc.day, clock: WFc.clock, live: WFc.live, zone: WFc.zone }; }, setFloor, lastClockDay,
@@ -4367,7 +4380,7 @@ async function pubChangedDays(a, run, teamId) {
 /* two-way Shifts check (accounts enabled for publishing): read the team, compare per person-day, take Shifts' version where Shifts is newer */
 /* accounts whose people, stations and schedules come straight from their Shifts team (reader flow). Crane comes from the portal feed. */
 const readAccs = () => { const P = CONN.pilot || {}; return (P.read || (P.accounts || []).filter(x => x === 'ONT')).filter(x => (CONN.standalone || x !== 'CRN') && W.ACC[x]); };
-function cacheNotice(){const cached=Object.entries(DB.teams||{}).filter(([acc,x])=>x.cachedAt&&x.st!=='ok'&&(S.acc==='all'||S.acc===acc));return cached.length?`<p class="note">Showing saved database snapshots: ${cached.map(([acc,x])=>esc(W.ACC[acc].name)+' ('+esc(new Date(x.cachedAt).toLocaleString())+')').join(', ')}. Teams refresh ${cached.some(([,x])=>x.st==='failed')?'failed; these records may be stale':'is running'}.</p>`:'';}
+function cacheNotice(){const cached=Object.entries(DB.teams||{}).filter(([acc,x])=>x.cachedAt&&x.st!=='ok'&&(S.acc==='all'||S.acc===acc));return cached.length?`<p class="note">Showing saved data while Teams Shifts loads: ${cached.map(([acc,x])=>esc(W.ACC[acc].name)+' ('+(x.feedAt?'Shifts read '+Math.max(0,Math.round((Date.now()-Date.parse(x.feedAt))/60000))+' min ago':'snapshot '+esc(new Date(x.cachedAt).toLocaleString()))+')').join(', ')}. Teams refresh ${cached.some(([,x])=>x.st==='failed')?'failed; these records may be stale':'is running'}.</p>`:'';}
 /* Crane's full snapshot is ~15 MB of JSON: saving it as jsonb hit the database statement timeout. Snapshots over 1 MB are saved gzipped
    ({gz: base64, ~10x smaller}) and unpacked after reading; smaller ones stay plain. */
 async function packTeamCache(J){const s=JSON.stringify(J);if(s.length<1e6||typeof CompressionStream==='undefined')return J;
@@ -4377,6 +4390,7 @@ async function unpackTeamCache(P){if(!P||typeof P.gz!=='string')return P;const b
 /* Team snapshots (wft_team_cache): shown at sign-in, and within 24 h only the last 2 weeks + next 5 are read again (no history fill).
    Switched off for a few minutes on 2026-10-30 after slow test loads that turned out to be Chrome slowing a background tab. */
 const TEAM_CACHE_ON = true;
+const FEED_ON = true, FEED_MAX_AGE = 45 * 60000;   // Supabase Shifts feed: used for the first view when read in the last 45 min
 async function dbSaveTeamCache(acc,J){if(!TEAM_CACHE_ON||!DB.on||!['Admin','RTA'].includes(W.ME.role)||!J.complete||J.partial)return;const {error}=await DB.sb.from('wft_team_cache').upsert({account_id:acc,payload:await packTeamCache(J),version:1,captured_at:new Date().toISOString(),captured_by:DB.profile?.id});if(error)DB.cacheError=error.message;else DB.cacheSavedAt=new Date().toISOString();}
 async function dbReadAll(query,maxRows=Infinity){const rows=[];for(let offset=0;;offset+=1000){if(offset>=maxRows)return {data:rows,error:null,truncated:true};const r=await query().range(offset,offset+999);if(r.error)throw Error(r.error.message);rows.push(...(r.data||[]));if((r.data||[]).length<1000)return {data:rows,error:null};}}
 /* change history: read without failing the account. Too large (over 60,000 rows in 60 days) or too slow = schedules still load, history
@@ -4422,12 +4436,18 @@ async function dbLoadTeams(p) {
  DB.teams=DB.teams||{};accs.forEach(acc=>DB.teams[acc]={st:'loading',at:Date.now(),loaded:false});render();
  await Promise.all(accs.map(async acc=>{const started=Date.now();
   let snap=null;
+  /* fast start: the Supabase Shifts feed (server reads Shifts every 30 min) refreshes the saved snapshot's next 3 weeks before the first
+     render; the live read below still runs and replaces everything, unchanged. A failed or stale feed is simply skipped. */
+  const feedP=FEED_ON?DB.sb.from('wft_shifts_feed').select('payload,read_at,ok').eq('account_id',acc).maybeSingle().then(r=>!r.error&&r.data&&r.data.ok&&Array.isArray(r.data.payload?.shifts)&&Date.now()-Date.parse(r.data.read_at)<FEED_MAX_AGE?r.data:null,()=>null):Promise.resolve(null);
+  const showFeed=(J,feed,at)=>{if(feed&&Array.isArray(J.swaps)){DB.swaps=DB.swaps||{};DB.swaps[acc]={...W.loadTeamSwaps(acc,J),err:'',at:new Date().toLocaleTimeString()};}DB.teams[acc]={st:'loading',loaded:true,cachedAt:at,feedAt:feed?feed.read_at:null,at:started};render();};
   if(TEAM_CACHE_ON)try{const cached=await DB.sb.from('wft_team_cache').select('payload,captured_at,version').eq('account_id',acc).maybeSingle();
    if(!cached.error&&cached.data)cached.data.payload=await unpackTeamCache(cached.data.payload);
    if(cached.error){DB.cacheError=cached.error.message;}else if(cached.data?.version===1&&Array.isArray(cached.data.payload?.shifts)){
-    snap=cached.data;await dbRestoreTeam(acc,cached.data.payload,P);DB.teams[acc]={st:'loading',loaded:true,cachedAt:cached.data.captured_at,at:started};render();
+    snap=cached.data;const feed=await feedP,J=feed?W.feedMerge(cached.data.payload,feed.payload):cached.data.payload;
+    await dbRestoreTeam(acc,J,P);showFeed(J,feed,feed&&Date.parse(feed.read_at)>Date.parse(cached.data.captured_at)?feed.read_at:cached.data.captured_at);
    }
   }catch(e){DB.cacheError=e.message;}
+  if(!snap)try{const feed=await feedP;if(feed){const J=W.feedMerge(null,feed.payload);await dbRestoreTeam(acc,J,P);showFeed(J,feed,feed.read_at);}}catch(e){console.warn('shifts feed',e.message);}
   try{const J=await dbReadTeam(acc,snap,{recent:true}),changes=await dbRestoreTeam(acc,J,P),L=W.LIVE.teams[acc]||{};
    DB.teams[acc]={st:'ok',loaded:true,people:L.people,shifts:L.shifts,stations:(L.stations||[]).length,secs:Math.round((Date.now()-started)/1000),hist:J.partial?'loading':'ok'};
    if(['Admin','RTA','Team lead'].includes(p.role)){await dbSyncPeople();if(DB.peopleOk&&!changes.failed)await dbSaveReaderOriginals(acc,changes.data||[]);}
