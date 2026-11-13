@@ -457,6 +457,109 @@ h1,.drawer header h2{font-family:var(--sans);letter-spacing:-.025em}h1{font-size
 .drawer:has(.activity-edit-list){width:min(760px,96vw)}.gname .bcopy{width:auto;min-width:34px}.activity-tools{display:flex;gap:10px;margin:16px 0;flex-wrap:wrap}.activity-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:16px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;margin-bottom:14px}.activity-row label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600}.activity-row .activity-name{grid-column:span 2}.activity-row .in{width:100%;min-width:0}.activity-row button{align-self:end}.activity-edit-list{margin-top:16px}
 .gbk:focus{outline:3px solid var(--accent,#00d5ff);outline-offset:3px;z-index:5}.gbk{cursor:pointer}
 .chart-legend{display:flex;gap:8px 20px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;line-height:1.5}.chart-key{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.chart-key b{font-variant-numeric:tabular-nums;white-space:nowrap}.chart-key small{color:var(--ink3);font-size:11px}.chart-swatch{width:22px;flex:0 0 22px;border-top:3px solid var(--series)}.chart-target .chart-swatch{border-top:2px dotted var(--bad)}.chart-target{color:var(--ink3)}.chart-scroll{overflow-x:auto}.chart-scroll svg{display:block;min-width:400px}.chart-empty{min-height:210px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--ink3);text-align:center;padding:24px}.chart-empty b{color:var(--ink2)}
+/* ===== Glass layer (2026-11-13). Frosted panels over a ground tinted by the selected account.
+   Blur only where content passes underneath (top bar, side rail, sticky table heads, drawers, menus);
+   panels over the smooth ground use translucent fill only, which looks the same and costs nothing to scroll. ===== */
+@property --tintA{syntax:'<color>';inherits:true;initial-value:#5b8cff}
+@property --tintB{syntax:'<color>';inherits:true;initial-value:#7a5cff}
+:root{
+  --acc-CRN:#5b8cff; --acc-ONT:#a77bff; --acc-RIV:#2fc8d8; --acc-NBQ:#e070c8; --acc-NBG:#b9d46a;
+  --tintA:#5b8cff; --tintB:#7a5cff; --ground:#050a16;
+  --glass:rgba(17,27,50,.58); --glass2:rgba(24,37,66,.66); --glass-hi:rgba(255,255,255,.055);
+  --glass-line:rgba(170,195,255,.13); --glass-edge:rgba(255,255,255,.10); --th-bg:rgba(11,19,37,.86);
+  --blur:18px; --shadow:0 12px 32px -14px rgba(0,0,0,.6),0 2px 6px -2px rgba(0,0,0,.35);
+  --panel:var(--glass); --panel2:var(--glass2); --bg2:rgba(9,16,32,.55);
+  --line:rgba(170,195,255,.10); --line2:rgba(170,195,255,.18); --ink3:#8a9bb5;
+  transition:--tintA .6s cubic-bezier(.2,.7,.2,1),--tintB .6s cubic-bezier(.2,.7,.2,1);
+}
+:root[data-acc="CRN"]{--tintA:var(--acc-CRN);--tintB:#3a5fd6}
+:root[data-acc="ONT"]{--tintA:var(--acc-ONT);--tintB:#5b4fd0}
+:root[data-acc="RIV"]{--tintA:var(--acc-RIV);--tintB:#2a7fc4}
+:root[data-acc="NBQ"]{--tintA:var(--acc-NBQ);--tintB:#8a4fc4}
+:root[data-acc="NBG"]{--tintA:var(--acc-NBG);--tintB:#3f9a8c}
+:root[data-theme="light"]{
+  --ground:#e9eef8; --glass:rgba(255,255,255,.64); --glass2:rgba(255,255,255,.78); --glass-hi:rgba(255,255,255,.5);
+  --glass-line:rgba(30,55,100,.11); --glass-edge:rgba(255,255,255,.9); --th-bg:rgba(246,248,253,.92);
+  --shadow:0 12px 30px -16px rgba(30,50,95,.30),0 2px 6px -3px rgba(30,50,95,.14);
+  --bg2:rgba(255,255,255,.7); --line:rgba(25,45,90,.09); --line2:rgba(25,45,90,.16); --ink3:#53627a;
+}
+body{background:var(--ground)}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(70vw 60vh at 8% 0%,color-mix(in srgb,var(--tintA) 26%,transparent),transparent 72%),
+    radial-gradient(60vw 60vh at 100% 100%,color-mix(in srgb,var(--tintB) 22%,transparent),transparent 70%),var(--ground)}
+:root[data-theme="light"] body::before{background:radial-gradient(70vw 60vh at 8% 0%,color-mix(in srgb,var(--tintA) 22%,transparent),transparent 72%),
+    radial-gradient(60vw 60vh at 100% 100%,color-mix(in srgb,var(--tintB) 16%,transparent),transparent 70%),var(--ground)}
+::selection{background:color-mix(in srgb,var(--tintA) 40%,transparent);color:var(--ink)}
+html{scrollbar-color:color-mix(in srgb,var(--ink3) 45%,transparent) transparent}
+input,textarea{caret-color:var(--tintA)}
+:focus-visible{outline:2px solid color-mix(in srgb,var(--tintA) 85%,var(--ink));outline-offset:2px}
+
+/* surfaces */
+.panel,.strip,.alarm,.page-guide{background:linear-gradient(180deg,var(--glass-hi),transparent 46px),var(--glass);border:1px solid var(--glass-line);
+  box-shadow:inset 0 1px 0 var(--glass-edge),var(--shadow);border-radius:14px}
+.panel .panel,.panel .strip{background:var(--glass-hi);box-shadow:none}
+.alarm{border-color:color-mix(in srgb,var(--bad) 45%,var(--glass-line));background:linear-gradient(180deg,color-mix(in srgb,var(--bad) 10%,transparent),transparent 60px),var(--glass)}
+.strip>div{border-right-color:var(--glass-line)}
+.side{background:var(--glass);border-right:1px solid var(--glass-line);backdrop-filter:blur(var(--blur)) saturate(140%);-webkit-backdrop-filter:blur(var(--blur)) saturate(140%)}
+.top{background:color-mix(in srgb,var(--ground) 52%,transparent);border-bottom:1px solid var(--glass-line);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);flex-wrap:nowrap}
+#syncPill{min-width:30px;flex:0 1 auto;overflow:hidden}#syncPill .pill{max-width:min(42ch,34vw);overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:middle}
+.drawer,.cmdk .box,.tipbox{background:var(--glass2);border-color:var(--glass-line);backdrop-filter:blur(24px) saturate(150%);-webkit-backdrop-filter:blur(24px) saturate(150%)}
+.scrim,.cmdk{background:rgba(3,7,16,.42);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+th{background:var(--th-bg);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom-color:var(--glass-line)}
+td{border-bottom-color:var(--line)}
+tr.click:hover>td{background:color-mix(in srgb,var(--tintA) 7%,transparent)}
+.in,select.in{background:var(--bg2);border-color:var(--glass-line)}
+.btn{background:var(--glass-hi);border-color:var(--glass-line)}
+.btn:hover{background:color-mix(in srgb,var(--ink) 9%,transparent)}
+.btn.pri{background:var(--pri);border-color:var(--pri);box-shadow:0 6px 16px -8px rgba(0,40,110,.7)}
+.ms{box-shadow:0 8px 20px -10px rgba(0,30,80,.75)}
+
+/* navigation: account chips carry the account colour; the current page is a tinted glass pill */
+.chip{border-color:var(--glass-line);background:var(--glass-hi)}
+.chip.on{background:color-mix(in srgb,var(--tintA) 24%,var(--glass));border-color:color-mix(in srgb,var(--tintA) 65%,transparent);color:var(--ink)}
+.chips .chip[data-v="CRN"]{--chipc:var(--acc-CRN)}.chips .chip[data-v="ONT"]{--chipc:var(--acc-ONT)}.chips .chip[data-v="RIV"]{--chipc:var(--acc-RIV)}.chips .chip[data-v="NBQ"]{--chipc:var(--acc-NBQ)}.chips .chip[data-v="NBG"]{--chipc:var(--acc-NBG)}
+.top .chips .chip[data-v]::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--chipc,transparent);margin-right:6px;vertical-align:1px}
+.top .chips .chip[data-v="all"]::before{display:none}
+.nav{border-left:0}
+.nav.on{background:color-mix(in srgb,var(--tintA) 16%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--tintA) 30%,transparent);border-left:0}
+.nav:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
+
+/* status: static dot, no decorative pulse or glow */
+.pulse{animation:none;box-shadow:none}
+.si-art::before{display:none}.si-orbit{box-shadow:none}
+
+/* heat cells: strength 1-3 deepens the state colour */
+.heat td.hc{--k:1;border-color:transparent}
+.hc.ok{background:color-mix(in srgb,var(--ok) calc(8% + var(--k) * 4%),transparent)}
+.hc.tight{background:color-mix(in srgb,var(--warn) calc(10% + var(--k) * 8%),transparent)}
+.hc.short{background:color-mix(in srgb,var(--bad) calc(14% + var(--k) * 10%),transparent);color:var(--bad)}
+.heat td.hc b{font-size:13px;margin-right:3px}
+.heat td.hc small{font-weight:600;opacity:.85}
+
+/* account trend chart */
+.trend{position:relative}.trend svg{display:block;width:100%;height:auto;overflow:visible}
+.trend .t-line{fill:none;stroke-width:2.25;stroke-linejoin:round;stroke-linecap:round}
+.trend .t-dot{stroke:var(--ground);stroke-width:2}
+.trend .t-lab{font:600 12px var(--sans);fill:var(--ink)}.trend .t-lab tspan{fill:var(--ink2);font-weight:500}
+.trend .t-axis{font:11px var(--sans);fill:var(--ink3)}
+.trend .t-grid{stroke:var(--line)}
+.trend .t-target{stroke:var(--bad);stroke-dasharray:4 5;opacity:.8}
+.line-chart .area{opacity:.16}
+
+/* glass needs a backdrop; without blur support or with reduced transparency, surfaces turn solid */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  :root{--glass:#0f1a31;--glass2:#15223e;--th-bg:#0f1a31}:root[data-theme="light"]{--glass:#fff;--glass2:#f7f9fd;--th-bg:#f6f8fd}}
+@media (prefers-reduced-transparency:reduce){
+  :root{--glass:#0f1a31;--glass2:#15223e;--th-bg:#0f1a31}:root[data-theme="light"]{--glass:#fff;--glass2:#f7f9fd;--th-bg:#f6f8fd}
+  .side,.top,.drawer,.cmdk .box,.tipbox,th{backdrop-filter:none;-webkit-backdrop-filter:none}}
+@media (prefers-reduced-motion:reduce){:root{transition:none}}
+.top .chips{flex:0 0 auto;min-width:0}.top .chips .chip{white-space:nowrap;padding:5px 10px}
+[data-a="pageHelp"] .hs{display:none}
+@media (max-width:1600px){.top .srch .t{display:none!important}.top .srch{min-width:0}.user .un{display:none}#syncPill .pill{max-width:13ch}
+  [data-a="pageHelp"] .hl{display:none}[data-a="pageHelp"] .hs{display:inline}}
+@media (max-width:1279px){.top .chips{flex:0 1 auto}}
+table.heat{border-collapse:separate;border-spacing:3px}.heat td.hc{border:0}.heat td,.heat th{border-bottom:0}
+@media (max-width:780px){.top{flex-wrap:wrap}}
 </style>
 </head>
 <body>
@@ -2387,6 +2490,7 @@ function render() {
   const pickerScroll=document.querySelector('.spk-l')?.scrollTop || 0, gridPos=$('bgrid')?{top:$('bgrid').scrollTop,left:$('bgrid').scrollLeft}:null;
   const fid = document.activeElement && document.activeElement.id, sel = fid && document.activeElement.selectionStart;
   if (isPhone()) { $('root').innerHTML = phoneBlock(); return; }
+  document.documentElement.dataset.acc = S.auth ? S.acc : 'all';   // glass ground takes the selected account's colour
   $('root').innerHTML = S.auth ? shell() : signin();
   if(document.querySelector('.spk-l')) document.querySelector('.spk-l').scrollTop=pickerScroll;
   // any table that isn't already inside a scroller gets one, so wide tables scroll inside their panel
@@ -2630,7 +2734,7 @@ function shell() {
         <select class="in" data-f="loc" aria-label="Location" style="width:auto;min-height:30px;padding:3px 8px"><option value="all">All locations</option>${locList().map(x => `<option ${S.loc === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
         <button class="srch" data-a="cmdOpen" aria-label="Search people and pages"><span>⌕</span><span class="t">Search people & pages</span></button>
         <span class="sp"></span><span id="syncPill">${syncPill()}</span>
-        <button class="btn sm" data-a="pageHelp">Help with this page</button><button class="btn sm ghost" data-a="theme" aria-label="Switch theme">◐</button>
+        <button class="btn sm" data-a="pageHelp" aria-label="Help with this page"><span class="hl">Help with this page</span><span class="hs">Help</span></button><button class="btn sm ghost" data-a="theme" aria-label="Switch theme">◐</button>
         <span class="user" title="${esc(W.ME.name)} · ${esc(W.ME.role)}"><span class="av">${initials(W.ME.name)}</span><span class="un">${esc(W.ME.name.split(' ')[0] === W.ME.name ? W.ME.name : W.ME.name)}<small>${esc(W.ME.role)}</small></span></span><button class="btn sm ghost" data-a="logout" title="Sign out" aria-label="Sign out">Sign out</button></div>
       <main id="main">${pageIntro()}${cacheNotice()}${loadingNote()}${['live','overview'].includes(S.page) ? timeZonePanel() : ''}${loadingGate() || ({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
     </div></div>`;
@@ -3124,7 +3228,7 @@ function lineChart(series, target, lo, hi) {
     ${dates.map((d,i) => i % every === 0 || i === dates.length - 1 && i % every > every / 2 ? `<text x="${x(d)}" y="${H - 8}" text-anchor="${i===0&&dates.length>1?'start':i===dates.length-1&&dates.length>1?'end':'middle'}" font-size="11" fill="var(--ink3)">${fmtS(d)}</text>` : '').join('')}
     ${Number.isFinite(target) ? `<line x1="${pl}" x2="${Wd - pr}" y1="${y(target)}" y2="${y(target)}" stroke="var(--bad)" stroke-dasharray="3 5"/>` : ''}
     ${series.map((s,si) => { const byDate = new Map(s.pts), groups = []; let group = []; for (const d of dates) { const v = byDate.get(d); if (Number.isFinite(v)) group.push([d,v]); else if (group.length) { groups.push(group); group = []; } } if (group.length) groups.push(group);
-      return groups.map(g => `<polyline fill="none" stroke="${s.color}" stroke-width="2" ${si ? 'stroke-dasharray="7 4"' : ''} points="${g.map(([d,v]) => `${x(d)},${y(v)}`).join(' ')}"/>${g.map(([d,v]) => `<circle cx="${x(d)}" cy="${y(v)}" r="3" fill="${s.color}" stroke="var(--panel)" stroke-width="1"><title>${esc(s.name)} · ${fmtS(d)}: ${fmtPct(v)}</title></circle>`).join('')}`).join(''); }).join('')}
+      return groups.map(g => `${!si && g.length > 1 ? `<path class="area" fill="${s.color}" d="M${x(g[0][0])},${pt + ih} ${g.map(([d,v]) => `L${x(d)},${y(v)}`).join(' ')} L${x(g[g.length - 1][0])},${pt + ih} Z"/>` : ''}<polyline fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" ${si ? 'stroke-dasharray="7 4"' : ''} points="${g.map(([d,v]) => `${x(d)},${y(v)}`).join(' ')}"/>${g.map(([d,v]) => `<circle cx="${x(d)}" cy="${y(v)}" r="3" fill="${s.color}" stroke="var(--panel)" stroke-width="1"><title>${esc(s.name)} · ${fmtS(d)}: ${fmtPct(v)}</title></circle>`).join('')}`).join(''); }).join('')}
   </svg></div></div>`;
 }
 
@@ -3182,6 +3286,43 @@ function pSettings() {
 /* ---------- OVERVIEW (corporate) ---------- */
 const spark = (vals, t) => { const v = vals.map(x => x == null ? 0 : x), mx = Math.max(t * 1.6, ...v, 1), W2 = 110, H2 = 26, x = i => i / Math.max(1, v.length - 1) * W2, y = q => H2 - 2 - q / mx * (H2 - 4);
   return `<svg class="spark" width="${W2}" height="${H2}" viewBox="0 0 ${W2} ${H2}" aria-hidden="true"><line x1="0" x2="${W2}" y1="${y(t)}" y2="${y(t)}" stroke="var(--bad)" stroke-dasharray="3 3" opacity=".6"/><polyline fill="none" stroke="var(--acc)" stroke-width="1.6" points="${v.map((q, i) => x(i) + ',' + y(q)).join(' ')}"/><circle cx="${x(v.length - 1)}" cy="${y(v[v.length - 1])}" r="2.5" fill="var(--acc)"/></svg>`; };
+/* Account summary trend (glass redesign, 2026-11-13): absence by week, one line per account in its account colour,
+   each line labelled at its end so nobody has to match a legend. Labels are pushed apart when values are close. */
+function accTrendChart(rows, weeks) {
+  const series = rows.map(r => ({ id:r.acc.id, name:r.acc.name, pts:r.trend.map((v, i) => [weeks[i], v]), target:r.acc.absTarget }));
+  const vals = series.flatMap(s => s.pts.map(p => p[1])).filter(Number.isFinite);
+  if (!vals.length) return '<div class="chart-empty"><b>No absence data for the last 8 weeks</b><span>Absence shows once schedules and leave have loaded for these accounts.</span></div>';
+  const targets = [...new Set(series.map(s => s.target).filter(Number.isFinite))];
+  const hi = Math.max(...vals, ...targets, 1), step = hi > 20 ? 5 : hi > 8 ? 2 : 1, top = Math.ceil(hi * 1.12 / step) * step;
+  const Wd = 940, H = 250, pl = 40, pr = 170, pt = 12, pb = 28, iw = Wd - pl - pr, ih = H - pt - pb;
+  const x = i => pl + iw * (weeks.length === 1 ? .5 : i / (weeks.length - 1)), y = v => pt + ih - v / top * ih;
+  const ticks = []; for (let t = 0; t <= top; t += step) ticks.push(t);
+  const col = id => `var(--acc-${id},var(--acc))`;
+  const ends = series.map(s => { let i = s.pts.length - 1; while (i >= 0 && !Number.isFinite(s.pts[i][1])) i--; return i < 0 ? null : { s, i, v:s.pts[i][1], y:y(s.pts[i][1]) }; }).filter(Boolean).sort((a, b) => a.y - b.y);
+  ends.forEach((e, k) => { e.ly = Math.max(e.y, k ? ends[k - 1].ly + 16 : pt + 6); });                 // push labels down so they never overlap
+  for (let k = ends.length - 1; k >= 0; k--) if (ends[k].ly > pt + ih) ends[k].ly = Math.min(ends[k].ly, k < ends.length - 1 ? ends[k + 1].ly - 16 : pt + ih);
+  const lines = series.map(s => { const g = [], out = []; s.pts.forEach(([, v], i) => { if (Number.isFinite(v)) g.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`); else if (g.length) { out.push(g.splice(0)); } }); if (g.length) out.push(g);
+    return out.map(seg => `<polyline class="t-line" style="stroke:${col(s.id)}" points="${seg.join(' ')}"/>`).join('') +
+      s.pts.map(([w, v], i) => Number.isFinite(v) ? `<circle class="t-dot" cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${i === s.pts.length - 1 ? 4 : 2.6}" style="fill:${col(s.id)}"><title>${esc(s.name)} · week of ${fmtS(w)}: ${fmtPct(v)}</title></circle>` : '').join(''); }).join('');
+  const tgt = targets.length === 1 ? `<line class="t-target" x1="${pl}" x2="${pl + iw}" y1="${y(targets[0])}" y2="${y(targets[0])}"/><text class="t-axis" x="${pl + 6}" y="${y(targets[0]) - 6}">Target ${fmtPct(targets[0])}</text>`
+    : targets.map(t => `<line class="t-target" x1="${pl}" x2="${pl + iw}" y1="${y(t)}" y2="${y(t)}"/>`).join('');
+  const summary = ends.map(e => `${e.s.name} ${fmtPct(e.v)}`).join(', ');
+  return `<div class="trend"><svg viewBox="0 0 ${Wd} ${H}" role="img" aria-label="Absence by week, last 8 weeks, one line per account. Latest: ${esc(summary)}.">
+    ${ticks.map(t => `<line class="t-grid" x1="${pl}" x2="${pl + iw}" y1="${y(t)}" y2="${y(t)}"/><text class="t-axis" x="${pl - 8}" y="${y(t) + 4}" text-anchor="end">${t}%</text>`).join('')}
+    ${weeks.map((w, i) => `<text class="t-axis" x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === weeks.length - 1 ? 'end' : 'middle'}">${fmtS(w)}</text>`).join('')}
+    ${tgt}${lines}
+    ${ends.map(e => `${Math.abs(e.ly - e.y) > 2 ? `<path d="M${x(e.i) + 6} ${e.y} L${pl + iw + 10} ${e.ly}" stroke="${col(e.s.id)}" stroke-width="1" opacity=".5" fill="none"/>` : ''}<text class="t-lab" x="${pl + iw + 14}" y="${e.ly + 4}">${esc(e.s.name)} <tspan>${fmtPct(e.v)}</tspan></text>`).join('')}
+  </svg></div>`;
+}
+/* Severity of one account-day in the 14-day schedule check: colour class and strength 1-3 (glass redesign, 2026-11-13).
+   n = { short: stations below their reference, tight: stations 0-1 person above it, total: stations checked } */
+function heatClass(n) {
+  // Share of the account's stations, not the raw count: 1 of 69 Crane stations below is milder than 2 of 10 at NFI.
+  const of = k => n.total ? k / n.total : 0;
+  if (n.short) return { cls:'short', lvl:of(n.short) >= .15 || n.short >= 5 ? 3 : of(n.short) >= .05 || n.short >= 2 ? 2 : 1 };
+  if (n.tight) return { cls:'tight', lvl:of(n.tight) >= .5 ? 3 : of(n.tight) >= .2 ? 2 : 1 };
+  return { cls:'ok', lvl:1 };
+}
 function pOverview() {
   const accs = W.ACCOUNTS.filter(a => inScope(a.id)), live = W.live(), from4 = addD(weekStart(TODAY), -21), ds = range(TODAY, addD(TODAY, 13));
   const weeks = Array.from({ length:8 }, (_, i) => addD(weekStart(TODAY), -7 * (7 - i)));
@@ -3189,7 +3330,7 @@ function pOverview() {
     const lv = live.filter(r => r.a.acc === acc.id && !r.a.inactive), on = lv.filter(r => ['in','inlate','late','out'].includes(r.st));
     const A = W.absStats({ from:from4, to:TODAY, acc:acc.id }), H = W.adhStats({ from:addD(TODAY, -6), to:TODAY, acc:acc.id }).T;
     const lobs = W.LOBS.filter(l => l.acc === acc.id);
-    let risk = 0, over = 0; const heat = ds.map(d => { let short = 0, tight = 0; lobs.forEach(l => { const c = W.cov(l.key, d); if (c.req && c.avail - c.pend < c.req) short++; else if (c.req && c.avail - c.pend < c.req + 2) tight++; if (W.allocation(l.key, d).left < 0) over++; }); risk += short ? 1 : 0; return { short, tight }; });
+    let risk = 0, over = 0; const heat = ds.map(d => { let short = 0, tight = 0; lobs.forEach(l => { const c = W.cov(l.key, d); if (c.req && c.avail - c.pend < c.req) short++; else if (c.req && c.avail - c.pend < c.req + 2) tight++; if (W.allocation(l.key, d).left < 0) over++; }); risk += short ? 1 : 0; return { short, tight, total:lobs.length }; });
     const trend = weeks.map(w => { const x = A.byW[w]; if (x) return pct(x.pl + x.un, x.sched); const y = W.absStats({ from:w, to:addD(w, 6), acc:acc.id }).T; return pct(y.pl + y.un, y.sched); });
     return { acc, hc:W.AG.filter(a => a.acc === acc.id && !a.inactive).length, sched:lv.filter(r => r.s.working && !r.s.absence && r.d === W.accountClock(acc.id).day).length, on:on.length,
       logged:on.filter(r => r.st === 'in' || r.st === 'inlate').length, miss:lv.filter(r => ['late','out','nologin'].includes(r.st)).length, leave:lv.filter(r => r.st === 'leave').length,
@@ -3208,15 +3349,16 @@ function pOverview() {
     <div><div class="l">Scheduled hours worked · 7 d</div><div class="v">${fmtPct(pct(Ht.inA, Ht.span))}</div><div class="h">${Ht.late} late logins</div></div>
     <div><div class="l">PTO pending</div><div class="v">${T.pend}</div><div class="h">+ ${W.SWAPS.filter(x => x.status === 'Pending approval' && swOk(x)).length} swaps to approve</div></div>
     <div><div class="l">No shifts loaded next week</div><div class="v ${noSch ? 'warn' : 'ok'}">${noSch}</div><div class="h"><button class="linkbtn" style="margin:0;padding:0;font-size:11.5px" data-a="go" data-v="schaudit">Open schedule audit →</button></div></div></div>
-  <section class="panel" style="margin-bottom:14px"><div class="tw"><table><thead><tr><th>Account</th><th class="n">HC</th><th class="n">Logged in / on shift</th><th class="n">Not in</th><th class="n">On leave</th><th class="n">ABS 4 wk</th><th class="n">Unplanned</th><th>ABS · 8 wk</th><th class="n">Scheduled hours worked 7 d</th><th class="n">PTO pend.</th><th class="n">Days below reference</th><th class="n">Days over leave limit</th></tr></thead><tbody>
+  <section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>Absence by week</h2><p class="sub">Last 8 weeks, planned + unplanned, one line per account. Dashed line = absence target.</p></div></div>${accTrendChart(rows, weeks)}</section>
+  <section class="panel" style="margin-bottom:14px"><div class="tw"><table><thead><tr><th>Account</th><th class="n">HC</th><th class="n">Logged in / on shift</th><th class="n">Not in</th><th class="n">On leave</th><th class="n">ABS 4 wk</th><th class="n">Unplanned</th><th class="n">Scheduled hours worked 7 d</th><th class="n">PTO pend.</th><th class="n">Days below reference</th><th class="n">Days over leave limit</th></tr></thead><tbody>
     ${rows.map(r => `<tr class="click" data-a="accGo" data-v="${r.acc.id}"><td class="nm">${esc(r.acc.name)}<div class="meta">${esc(r.acc.site)} · ${r.acc.lobs.length} LOBs</div></td><td class="n">${r.hc}</td><td class="n">${r.logged} / ${r.on}</td><td class="n">${r.miss ? `<span class="pill bad">${r.miss}</span>` : '0'}</td><td class="n">${r.leave}</td>
-      <td class="n"><b>${fmtPct(r.abs)}</b><div>${vsTarget(r.abs, r.acc.absTarget, false)}</div></td><td class="n">${fmtPct(r.un)}</td><td>${spark(r.trend, r.acc.absTarget)}</td>
+      <td class="n"><b>${fmtPct(r.abs)}</b><div>${vsTarget(r.abs, r.acc.absTarget, false)}</div></td><td class="n">${fmtPct(r.un)}</td>
       <td class="n"><b>${fmtPct(r.adh)}</b><div>${vsTarget(r.adh, r.acc.adhTarget, true)}</div></td><td class="n">${r.pend}</td><td class="n">${r.risk ? `<span class="pill warn">${r.risk}</span>` : '0'}</td><td class="n">${r.over ? `<span class="pill bad">${r.over}</span>` : '0'}</td></tr>`).join('')}
-    </tbody></table></div><p class="foot-note">Days below reference = dates in the next 14 days when a station is below its configured schedule reference (not a volume forecast). Over-allocated = LOB-days where booked and pending PTO exceed the slots. Sparkline dashed line = ABS target.</p></section>
+    </tbody></table></div><p class="foot-note">Days below reference = dates in the next 14 days when a station is below its configured schedule reference (not a volume forecast). Over-allocated = LOB-days where booked and pending PTO exceed the slots.</p></section>
   ${locPanel()}
   <section class="panel"><div class="panel-h"><div class="grow"><h2>Next 14 days · schedule checks by account</h2><p class="sub">Each cell counts stations compared with the configured schedule reference, after approved leave and pending requests. “1 near reference” means one station has fewer than two people above that reference. These are schedule checks, not headcount losses or volume forecasts.</p></div><button class="btn sm" data-a="go" data-v="schedule">Open schedule</button></div>
     <div class="tw"><table class="heat"><thead><tr><th>Account</th>${ds.map(d => `<th class="${d === TODAY ? 'today' : ''}"><span class="wk">${W.DOW[dow(d)]}</span>${W.parse(d).getDate()}</th>`).join('')}</tr></thead><tbody>
-    ${rows.map(r => `<tr><td class="nm">${esc(r.acc.name)}</td>${r.heat.map(n => `<td class="hc ${n.short || n.tight ? 'tight' : 'ok'}" title="${esc(r.acc.name)} · ${n.short} stations below configured reference · ${n.tight} within 0–1 person above reference; not volume based">${n.short ? n.short + ' below reference' : n.tight ? n.tight + ' near reference' : 'Above reference'}</td>`).join('')}</tr>`).join('')}</tbody></table></div></section>`;
+    ${rows.map(r => `<tr><td class="nm">${esc(r.acc.name)}</td>${r.heat.map(n => { const h = heatClass(n); return `<td class="hc ${h.cls}" style="--k:${h.lvl}" title="${esc(r.acc.name)} · ${n.short} of ${n.total} stations below configured reference · ${n.tight} within 0–1 person above reference; not volume based">${n.short ? `<b>${n.short}</b><small>below</small>` : n.tight ? `<b>${n.tight}</b><small>near</small>` : '<small>OK</small>'}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div></section>`;
 }
 
 function locPanel() {
