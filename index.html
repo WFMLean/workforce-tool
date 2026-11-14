@@ -579,6 +579,7 @@ input[type=date]:focus,input[type=time]:focus{outline:2px solid color-mix(in srg
 a.btn{text-decoration:none}
 :root[data-theme="light"] .hc.short{color:#8f1d28}:root[data-theme="light"] .hc.tight{color:#6e4700}
 details.how{margin:0 0 10px}details.how>summary{cursor:pointer;color:var(--ink3);font-size:12.5px;font-weight:600}details.how>summary:hover{color:var(--ink)}details.how p{margin:6px 0 0}
+.side .foot{background:color-mix(in srgb,var(--ground) 94%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--glass-line);margin-top:auto;z-index:2}
 details.adv{margin-top:14px}details.adv>summary{cursor:pointer;padding:12px 16px;border:1px solid var(--glass-line);border-radius:14px;background:var(--glass);font-weight:600;color:var(--ink2);list-style-position:inside}
 details.adv[open]>summary{margin-bottom:14px}details.adv>summary:hover{color:var(--ink)}
 @media (max-width:780px){.top{flex-wrap:wrap}}
@@ -2470,7 +2471,7 @@ global.WF = {
 'use strict';
 const W = WF, { esc, fmtS, fmtD, hm, addD, range, weekStart, TODAY, dow, pct, fmtPct, dur, initials } = W;
 const $ = id => document.getElementById(id);
-const S = { patMin:2, co:{ f:'act', t:'all' }, chk:{ acc:'', type:'open', q:'', page:0 }, rs:{ view:'people', lobs:[], lead:'all', st:'active', q:'', page:0, ws:weekStart(TODAY), gaps:false }, pv:{ from:weekStart(TODAY), to:addD(weekStart(TODAY), 6), lobs:[], type:'all', q:'', page:0, open:null }, spk:null, spkQ:'', navCol:(() => { try { return {Schedules:true,People:true,Reports:true,Settings:true,...JSON.parse(localStorage.getItem('wft.navcol') || '{}')}; } catch (e) { return {}; } })(), rail:(() => { try { return localStorage.getItem('wft.rail') === '1'; } catch (e) { return false; } })(), loc:'all', npLen:7, swTab:'Pending approval', swSel:null, swNote:'', auWk:1, auF:'all', auPick:new Set(), wi:{}, auth:false, page:'home', srcTab:'roster', td:{}, lgEmail:'', lgErr:'', acc:'all', liveF:'attention', sel:null, reqTab:'Pending', note:'', lob:'CRN|IAH', from:weekStart(TODAY), picked:new Set(),
+const S = { patMin:2, co:{ f:'act', t:'all' }, chk:{ acc:'', type:'open', q:'', page:0 }, rs:{ view:'people', lobs:[], lead:'all', st:'active', q:'', page:0, ws:weekStart(TODAY), gaps:false }, pv:{ from:weekStart(TODAY), to:addD(weekStart(TODAY), 6), lobs:[], type:'all', q:'', page:0, open:null }, spk:null, spkQ:'', navCol:(() => { try { return {Admin:true,Help:true,...JSON.parse(localStorage.getItem('wft.navcol2') || '{}')}; } catch (e) { return {}; } })(), rail:(() => { try { return localStorage.getItem('wft.rail') === '1'; } catch (e) { return false; } })(), loc:'all', npLen:7, swTab:'Pending approval', swSel:null, swNote:'', auWk:1, auF:'all', auPick:new Set(), wi:{}, auth:false, page:'home', srcTab:'roster', td:{}, lgEmail:'', lgErr:'', acc:'all', liveF:'attention', sel:null, reqTab:'Pending', note:'', lob:'CRN|IAH', from:weekStart(TODAY), picked:new Set(),
   adhP:7, adhG:'day', adhW:8, adhMo:3, adhLob:'all', otG:'week', otP:14, otW:8, otMo:3, otPg:0, absW:8, absG:'week', absMo:3, absLob:'all', aud:{ mod:'all', user:'all', q:'', days:30, page:0 } };
 try { const t = localStorage.getItem('wft.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 
@@ -2666,15 +2667,18 @@ function signin() {
 }
 const OPS = {budgets:[], pages:{}, balances:[], reasons:[], allocations:{}, hourlyReferences:{}, dailyReferencePct:null, clockSource:null};
 const UX = {auditStations:[], absStations:[], adhStations:[], otStations:[], pickerDraft:null, budgetAccount:null, budgetScope:'site', budgetGroup:null, balanceImport:null, balanceErrors:[]};
+/* five workspaces (2026-11-15 navigation redesign): daily work first, setup last. Same pages, same access rules. */
 const NAV = [
-  ['Today', [['home','Start here'],['overview','Account summary'],['live','Who is working now'],['requests','Review leave requests'],['swaps','Review shift swaps']]],
-  ['Schedules', [['builder','Edit schedules'],['schedule','View schedules'],['shiftchk','Compare with Teams Shifts'],['schaudit','Find schedule problems'],['allocation','Absence budgets & balances'],['whatif','Try staffing changes']]],
-  ['People', [['roster','People & teams'],['inactive','People who have left']]],
-  ['Reports', [['adherence','Adherence & work hours'],['abs','Absence report'],['ot','Overtime report'],['planvs','Schedule changes'],['audit','Activity history']]],
-  ['Settings', [['sources','Import people & teams'],['exempt','Absence reasons'],['notify','Team notifications'],['connect','Connected services'],['users','Users & access'],['settings','Tool settings']]],
-  ['Help', [['help','How to use this tool']]]
+  ['Floor', [['live','Who is working now'],['overview','Account summary']]],
+  ['Inbox', [['requests','Review leave requests'],['swaps','Review shift swaps']]],
+  ['Schedules', [['builder','Edit schedules'],['schedule','View schedules'],['shiftchk','Compare with Teams Shifts'],['schaudit','Find schedule problems'],['whatif','Try staffing changes'],['planvs','Schedule changes']]],
+  ['Reports', [['adherence','Adherence & work hours'],['abs','Absence report'],['ot','Overtime report'],['audit','Activity history']]],
+  ['Admin', [['roster','People & teams'],['inactive','People who have left'],['allocation','Absence budgets & balances'],['exempt','Absence reasons'],['notify','Team notifications'],['sources','Import people & teams'],['connect','Connected services'],['users','Users & access'],['settings','Tool settings']]],
+  ['Help', [['home','Start here'],['help','How to use this tool']]]
 ];
 const PAGES = NAV.flatMap(x => x[1]);
+/* where each role starts: RTAs on the floor, team leads on their inbox, everyone else on the account summary */
+const landingPage = () => ({ RTA:'live', 'Team lead':'requests', Executive:'overview' })[W.ME.role] || 'overview';
 const ROLE_PAGES = { RTA:['overview','live','requests','swaps','builder','schedule','roster','shiftchk','schaudit','inactive','allocation','whatif','adherence','abs','ot','planvs','exempt','notify','audit'], 'Team lead':['live','requests','swaps','builder','schedule','roster','shiftchk','schaudit','inactive','adherence','abs','ot','planvs','exempt'], Executive:['overview','roster','whatif','adherence','abs','ot','planvs','audit'] };
 const roleCan = (role,k) => ['home','help'].includes(k) || !ROLE_PAGES[role] || ROLE_PAGES[role].includes(k);
 const canSee = k => roleCan(W.ME.role,k) && (['home','help'].includes(k) || !OPS.pages[W.ME.email] || OPS.pages[W.ME.email].includes(k));
@@ -2785,7 +2789,7 @@ function shell() {
   const btn = ([k, l]) => `<button class="nav ${S.page === k ? 'on' : ''}" data-a="go" data-v="${k}" title="${l}" aria-label="${l}" ${S.page === k ? 'aria-current="page"' : ''}>${icon(k)}<span>${l}</span>${k === 'requests' && pend ? `<span class="cnt">${pend}</span>` : ''}${k === 'swaps' && swp ? `<span class="cnt">${swp}</span>` : ''}${k === 'inactive' && inn ? `<span class="cnt" style="background:var(--bad)">${inn}</span>` : ''}</button>`;
   return `<a class="skip" href="#main">Skip to content</a><div class="app ${S.rail ? 'rail' : ''}">
     <nav class="side" aria-label="Main"><div class="si-logo">${MARK} <span>Workforce Tool</span></div>
-      ${NAV.map(([sec, items]) => { const v = items.filter(([k]) => canSee(k)); if (!v.length) return ''; const col = S.navCol[sec] && !S.rail;
+      ${NAV.map(([sec, items]) => { const v = items.filter(([k]) => canSee(k)); if (!v.length) return ''; const col = S.navCol[sec] && !S.rail && !v.some(([k]) => k === S.page);
         return `<button class="navsec ${col ? 'col' : ''}" data-a="navSec" data-v="${sec}" aria-expanded="${!col}" aria-label="${sec} pages"><span>${sec}</span><i class="car">▾</i></button>` + `<div class="navitems" ${col?'hidden':''}>${v.map(btn).join('')}</div>`; }).join('')}
       <div class="foot"><button class="btn sm ghost" data-a="rail" title="${S.rail ? 'Expand menu' : 'Collapse to icons'}" aria-label="Toggle menu width">${S.rail ? '»' : '«'}</button><span class="ft meta">Workforce Tool</span></div></nav>
     <div>
@@ -4122,7 +4126,7 @@ async function dbAfterSignIn() {
   S.lgErr = 'Signed in. Loading your accounts… the first load can take a few minutes…'; render();
   await dbLoadLive(p);
   W.audit('Access', 'Signed in', p.email, '', p.role, 'Supabase Auth');
-  S.lgErr = ''; S.auth = true; S.acc = W.LIVE.accs.length === 1 ? W.LIVE.accs[0] : 'all'; S.page = 'overview';
+  S.lgErr = ''; S.auth = true; S.acc = W.LIVE.accs.length === 1 ? W.LIVE.accs[0] : 'all'; S.page = landingPage();
   await dbLoadAudit(); if (p.role === 'Admin') await dbLoadUsers(); render();
 }
 /* live data: the portal's synced Crane roster, Shifts schedules and requests, plus the tool's own saved work */
@@ -5388,7 +5392,7 @@ const A = {
       return dbAfterSignIn(); }
     if (!DEV) { S.lgErr = 'This copy is not connected to the database.'; return render(); }
     const u = W.login(em); if (!u) { S.lgErr = 'No active account with that email. Ask your WFM admin to create one.'; return render(); }
-    S.lgErr = ''; S.auth = true; S.acc = u.scope.includes('all') ? 'all' : u.scope[0]; S.page = 'home'; render(); },
+    S.lgErr = ''; S.auth = true; S.acc = u.scope.includes('all') ? 'all' : u.scope[0]; S.page = landingPage(); render(); },
   logout: async () => { W.audit('Access', 'Signed out', W.ME.email, '', '', '');
     if (DB.on) { clearTimeout(DB.dt); clearTimeout(DB.ct); clearTimeout(DB.t); await Promise.all([dbFlushDays(), dbFlushChanges(), dbFlush()]);
       if (dbPending() && !confirm(`${dbPending()} change${dbPending() === 1 ? ' has' : 's have'} not reached the database yet. They stay on this computer and are saved at your next sign-in. Sign out anyway?`)) return;
@@ -5431,7 +5435,7 @@ const A = {
     try { await navigator.clipboard.writeText(text); } catch (e) { return toast('Could not copy. Allow clipboard access for this site and try again.'); }
     const n = B.lobs.reduce((s, k) => s + W.postBreaks(k, B.gday, tg, chat), 0); close();
     toast(`Break plan copied · ${n} agents. Paste it in ${tg === 'personal' ? 'each agent’s chat' : chat || 'the Teams chat'} (nothing is sent automatically).`); },
-  navSec: el => { const k = el.dataset.v; S.navCol[k] = el.getAttribute('aria-expanded') === 'true'; try { localStorage.setItem('wft.navcol', JSON.stringify(S.navCol)); } catch (e) {} el.classList.toggle('col',S.navCol[k]);el.setAttribute('aria-expanded',String(!S.navCol[k]));if(el.nextElementSibling?.classList.contains('navitems'))el.nextElementSibling.hidden=S.navCol[k]; },
+  navSec: el => { const k = el.dataset.v; S.navCol[k] = el.getAttribute('aria-expanded') === 'true'; try { localStorage.setItem('wft.navcol2', JSON.stringify(S.navCol)); } catch (e) {} el.classList.toggle('col',S.navCol[k]);el.setAttribute('aria-expanded',String(!S.navCol[k]));if(el.nextElementSibling?.classList.contains('navitems'))el.nextElementSibling.hidden=S.navCol[k]; },
   rail: () => { S.rail = !S.rail; try { localStorage.setItem('wft.rail', S.rail ? '1' : '0'); } catch (e) {} render(); },
   cmdOpen: () => cmdOpen(),
   cmdClose: (el, e) => { if (e.target.id === 'cmdk' || el.tagName==='BUTTON') cmdClose(); },
