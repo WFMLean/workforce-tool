@@ -534,7 +534,7 @@ tr.click:hover>td{background:color-mix(in srgb,var(--tintA) 7%,transparent)}
 .hc.tight{background:color-mix(in srgb,var(--warn) calc(10% + var(--k) * 8%),transparent)}
 .hc.short{background:color-mix(in srgb,var(--bad) calc(14% + var(--k) * 10%),transparent);color:var(--bad)}
 .heat td.hc b{font-size:13px;margin-right:3px}
-.heat td.hc small{font-weight:600;opacity:.85}
+.heat td.hc small{font-weight:600}
 
 /* account trend chart */
 .trend{position:relative}.trend svg{display:block;max-width:100%;height:auto;overflow:visible}
@@ -572,6 +572,13 @@ input[type=date]:focus,input[type=time]:focus{outline:2px solid color-mix(in srg
 .accsel{position:relative;display:inline-flex;align-items:center;flex:0 0 auto}
 .accsel .adot{position:absolute;left:11px;width:9px;height:9px;border-radius:50%;background:var(--c);pointer-events:none;box-shadow:0 0 0 1px var(--glass-line)}
 .accsel select{min-width:210px;min-height:34px;padding-left:28px;font-weight:600;background:color-mix(in srgb,var(--tintA) 16%,var(--glass));border-color:color-mix(in srgb,var(--tintA) 45%,transparent)}
+.clockpill{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:10px;border:1px solid var(--glass-line);background:var(--glass-hi);color:var(--ink);font:600 12.5px var(--sans);font-variant-numeric:tabular-nums;white-space:nowrap;cursor:pointer}
+.clockpill:hover{background:color-mix(in srgb,var(--ink) 8%,transparent)}
+.floorq h2{font-size:18px;display:flex;align-items:center;gap:10px}.floorq .qn{display:inline-grid;place-items:center;min-width:34px;height:34px;padding:0 8px;border-radius:10px;font-size:18px;font-variant-numeric:tabular-nums}
+.floorq .qn.bad{background:color-mix(in srgb,var(--bad) 22%,transparent);color:var(--bad)}.floorq .qn.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+a.btn{text-decoration:none}
+:root[data-theme="light"] .hc.short{color:#8f1d28}:root[data-theme="light"] .hc.tight{color:#6e4700}
+details.how{margin:0 0 10px}details.how>summary{cursor:pointer;color:var(--ink3);font-size:12.5px;font-weight:600}details.how>summary:hover{color:var(--ink)}details.how p{margin:6px 0 0}
 details.adv{margin-top:14px}details.adv>summary{cursor:pointer;padding:12px 16px;border:1px solid var(--glass-line);border-radius:14px;background:var(--glass);font-weight:600;color:var(--ink2);list-style-position:inside}
 details.adv[open]>summary{margin-bottom:14px}details.adv>summary:hover{color:var(--ink)}
 @media (max-width:780px){.top{flex-wrap:wrap}}
@@ -2463,7 +2470,7 @@ global.WF = {
 'use strict';
 const W = WF, { esc, fmtS, fmtD, hm, addD, range, weekStart, TODAY, dow, pct, fmtPct, dur, initials } = W;
 const $ = id => document.getElementById(id);
-const S = { patMin:2, co:{ f:'all', t:'all' }, chk:{ acc:'', type:'open', q:'', page:0 }, rs:{ view:'people', lobs:[], lead:'all', st:'active', q:'', page:0, ws:weekStart(TODAY), gaps:false }, pv:{ from:weekStart(TODAY), to:addD(weekStart(TODAY), 6), lobs:[], type:'all', q:'', page:0, open:null }, spk:null, spkQ:'', navCol:(() => { try { return {Schedules:true,People:true,Reports:true,Settings:true,...JSON.parse(localStorage.getItem('wft.navcol') || '{}')}; } catch (e) { return {}; } })(), rail:(() => { try { return localStorage.getItem('wft.rail') === '1'; } catch (e) { return false; } })(), loc:'all', npLen:7, swTab:'Pending approval', swSel:null, swNote:'', auWk:1, auF:'all', auPick:new Set(), wi:{}, auth:false, page:'home', srcTab:'roster', td:{}, lgEmail:'', lgErr:'', acc:'all', liveF:'attention', sel:null, reqTab:'Pending', note:'', lob:'CRN|IAH', from:weekStart(TODAY), picked:new Set(),
+const S = { patMin:2, co:{ f:'act', t:'all' }, chk:{ acc:'', type:'open', q:'', page:0 }, rs:{ view:'people', lobs:[], lead:'all', st:'active', q:'', page:0, ws:weekStart(TODAY), gaps:false }, pv:{ from:weekStart(TODAY), to:addD(weekStart(TODAY), 6), lobs:[], type:'all', q:'', page:0, open:null }, spk:null, spkQ:'', navCol:(() => { try { return {Schedules:true,People:true,Reports:true,Settings:true,...JSON.parse(localStorage.getItem('wft.navcol') || '{}')}; } catch (e) { return {}; } })(), rail:(() => { try { return localStorage.getItem('wft.rail') === '1'; } catch (e) { return false; } })(), loc:'all', npLen:7, swTab:'Pending approval', swSel:null, swNote:'', auWk:1, auF:'all', auPick:new Set(), wi:{}, auth:false, page:'home', srcTab:'roster', td:{}, lgEmail:'', lgErr:'', acc:'all', liveF:'attention', sel:null, reqTab:'Pending', note:'', lob:'CRN|IAH', from:weekStart(TODAY), picked:new Set(),
   adhP:7, adhG:'day', adhW:8, adhMo:3, adhLob:'all', otG:'week', otP:14, otW:8, otMo:3, otPg:0, absW:8, absG:'week', absMo:3, absLob:'all', aud:{ mod:'all', user:'all', q:'', days:30, page:0 } };
 try { const t = localStorage.getItem('wft.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 
@@ -2775,20 +2782,21 @@ function shell() {
   if (!canSee(S.page)) S.page = PAGES.find(p => canSee(p[0]))[0];
   const pend = W.REQ.filter(r => r.status === 'Pending' && accOk(W.AGI[r.agent])).length, swp = W.SWAPS.filter(x => x.status === 'Pending approval' && swOk(x)).length, inn = myInactive().filter(x => x.futureShifts > 0).length;
   const accs = W.ACCOUNTS.filter(a => inScope(a.id)), chips = (W.ME.scope.includes('all') ? [['all','All accounts']] : []).concat(accs.map(a => [a.id, a.name]));
-  const btn = ([k, l]) => `<button class="nav ${S.page === k ? 'on' : ''}" data-a="go" data-v="${k}" title="${l}" ${S.page === k ? 'aria-current="page"' : ''}>${icon(k)}<span>${l}</span>${k === 'requests' && pend ? `<span class="cnt">${pend}</span>` : ''}${k === 'swaps' && swp ? `<span class="cnt">${swp}</span>` : ''}${k === 'inactive' && inn ? `<span class="cnt" style="background:var(--bad)">${inn}</span>` : ''}</button>`;
+  const btn = ([k, l]) => `<button class="nav ${S.page === k ? 'on' : ''}" data-a="go" data-v="${k}" title="${l}" aria-label="${l}" ${S.page === k ? 'aria-current="page"' : ''}>${icon(k)}<span>${l}</span>${k === 'requests' && pend ? `<span class="cnt">${pend}</span>` : ''}${k === 'swaps' && swp ? `<span class="cnt">${swp}</span>` : ''}${k === 'inactive' && inn ? `<span class="cnt" style="background:var(--bad)">${inn}</span>` : ''}</button>`;
   return `<a class="skip" href="#main">Skip to content</a><div class="app ${S.rail ? 'rail' : ''}">
     <nav class="side" aria-label="Main"><div class="si-logo">${MARK} <span>Workforce Tool</span></div>
       ${NAV.map(([sec, items]) => { const v = items.filter(([k]) => canSee(k)); if (!v.length) return ''; const col = S.navCol[sec] && !S.rail;
-        return `<button class="navsec ${col ? 'col' : ''}" data-a="navSec" data-v="${sec}" aria-expanded="${!col}"><span>${sec}</span><i class="car">▾</i></button>` + `<div class="navitems" ${col?'hidden':''}>${v.map(btn).join('')}</div>`; }).join('')}
+        return `<button class="navsec ${col ? 'col' : ''}" data-a="navSec" data-v="${sec}" aria-expanded="${!col}" aria-label="${sec} pages"><span>${sec}</span><i class="car">▾</i></button>` + `<div class="navitems" ${col?'hidden':''}>${v.map(btn).join('')}</div>`; }).join('')}
       <div class="foot"><button class="btn sm ghost" data-a="rail" title="${S.rail ? 'Expand menu' : 'Collapse to icons'}" aria-label="Toggle menu width">${S.rail ? '»' : '«'}</button><span class="ft meta">Workforce Tool</span></div></nav>
     <div>
       <div class="top"><label class="accsel" title="Account"><span class="adot" style="--c:${S.acc === 'all' ? 'transparent' : 'var(--acc-' + S.acc + ',var(--acc))'}" aria-hidden="true"></span><select class="in" data-f="accSel" aria-label="Account">${chips.map(([k, l]) => `<option value="${k}" ${S.acc === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
         <select class="in" data-f="loc" aria-label="Location" style="width:auto;min-height:30px;padding:3px 8px"><option value="all">All locations</option>${locList().map(x => `<option ${S.loc === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        <button class="clockpill" data-a="clockOpen" title="Account time · change the display clock" aria-label="Account time ${esc(floorClockText())}. Change the display clock"><span aria-hidden="true">◷</span> ${esc(floorClockText())}</button>
         <button class="srch" data-a="cmdOpen" aria-label="Search people and pages"><span>⌕</span><span class="t">Search people & pages</span></button>
         <span class="sp"></span><span id="syncPill">${syncPill()}</span>
         <button class="btn sm" data-a="pageHelp" aria-label="Help with this page"><span class="hl">Help with this page</span><span class="hs">Help</span></button><button class="btn sm ghost" data-a="theme" aria-label="Switch theme">◐</button>
         <span class="user" title="${esc(W.ME.name)} · ${esc(W.ME.role)}"><span class="av">${initials(W.ME.name)}</span><span class="un">${esc(W.ME.name.split(' ')[0] === W.ME.name ? W.ME.name : W.ME.name)}<small>${esc(W.ME.role)}</small></span></span><button class="btn sm ghost" data-a="logout" title="Sign out" aria-label="Sign out">Sign out</button></div>
-      <main id="main" tabindex="-1">${pageIntro()}${cacheNotice()}${loadingNote()}${['live','overview'].includes(S.page) ? timeZonePanel() : ''}${loadingGate() || ({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
+      <main id="main" tabindex="-1">${['live','overview'].includes(S.page) ? '' : pageIntro()}${cacheNotice()}${loadingNote()}${loadingGate() || ({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
     </div></div>`;
 }
 
@@ -2809,18 +2817,20 @@ function floorDay() {
 }
 const inLoc = a => S.loc === 'all' || W.locOf(a) === S.loc;
 const tagSrc = ab => { const x = String((ab && ab.source) || ''); return /shifts/i.test(x) ? ['Recorded in Shifts', 'info'] : /teams|request|portal/i.test(x) ? ['Teams request', 'info'] : ['Tagged in the tool', 'muted']; };
-const CO_F = [['all', 'All call-outs'], ['needtag', 'Needs a tag'], ['out', 'Logged out mid-shift'], ['expected', 'Late / expected'], ['overdue', 'ETA overdue'], ['arrived', 'Arrived'], ['conflict', 'Tagged absent but logged in'], ['planned', 'Planned'], ['unplanned', 'Unplanned']];
+const CO_F = [['act', 'Needs action'], ['all', 'All call-outs'], ['needtag', 'Needs a tag'], ['out', 'Logged out mid-shift'], ['expected', 'Late / expected'], ['overdue', 'ETA overdue'], ['arrived', 'Arrived'], ['conflict', 'Tagged absent but logged in'], ['planned', 'Planned'], ['unplanned', 'Unplanned']];
 const CO_RANK = { overdue:0, noshow:1, out:2, conflict:3, expected:4, late:5, arrived:6 };
-const coIn = (r, f) => f === 'all' || (f === 'needtag' ? r.cat === 'noshow' : f === 'arrived' ? ['arrived','late'].includes(r.cat) : ['conflict','expected','overdue','out'].includes(f) ? r.cat === f : f === r.type && !!r.ab);
+const coIn = (r, f) => f === 'all' || (f === 'act' && ['noshow','overdue','out','conflict'].includes(r.cat)) || (f === 'needtag' ? r.cat === 'noshow' : f === 'arrived' ? ['arrived','late'].includes(r.cat) : ['conflict','expected','overdue','out'].includes(f) ? r.cat === f : f === r.type && !!r.ab);
 function callouts(day) { return day.filter(r => r.ab || r.arr || ['noshow','conflict','late','expected','overdue','arrived','out'].includes(r.cat)).sort((x, y) => (CO_RANK[x.cat] ?? 6) - (CO_RANK[y.cat] ?? 6) || x.s.s - y.s.s || x.a.name.localeCompare(y.a.name)); }
+/* floor durations read as people say them: 59 min, 1 h 5 min (2026-11-15) */
+const durL = m => { m = Math.max(0, Math.round(m)); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''); };
 function coStatus(r) {
   const first = r.ses[0] ? hm(r.ses[0].i) : '', c = r.localClock ?? W.clock, x = r.arr || {}, note = x.note ? ' · ' + esc(x.note) : '';
-  if (r.cat === 'out') { const lo = r.ses[r.ses.length - 1].o; return `<span class="pill bad"><i></i>Logged out ${hm(lo)}</span><div class="meta">${dur(c - lo)} ago · shift ends ${hm(r.s.e)}</div>`; }
-  if (r.cat === 'expected') return `<span class="pill warn"><i></i>Late · expected ${hm(x.eta)}</span><div class="meta">${x.eta - r.s.s} min after start · ${dur(x.eta - c)} to go${note}</div>`;
-  if (r.cat === 'overdue') return `<span class="pill bad"><i></i>ETA overdue · ${hm(x.eta)}</span><div class="meta">${dur(c - x.eta)} past ETA, no login${note}</div>`;
-  if (r.cat === 'arrived') return `<span class="pill ok"><i></i>Arrived · reported ${hm(x.arr)}</span><div class="meta">${Math.max(0, x.arr - r.s.s)} min late · no clock-in yet${note}</div>`;
+  if (r.cat === 'out') { const lo = r.ses[r.ses.length - 1].o; return `<span class="pill bad"><i></i>Logged out ${hm(lo)}</span><div class="meta">${durL(c - lo)} ago · shift ends ${hm(r.s.e)}</div>`; }
+  if (r.cat === 'expected') return `<span class="pill warn"><i></i>Late · expected ${hm(x.eta)}</span><div class="meta">${durL(x.eta - r.s.s)} after start · ${durL(x.eta - c)} to go${note}</div>`;
+  if (r.cat === 'overdue') return `<span class="pill bad"><i></i>ETA overdue · ${hm(x.eta)}</span><div class="meta">${durL(c - x.eta)} past ETA, no login${note}</div>`;
+  if (r.cat === 'arrived') return `<span class="pill ok"><i></i>Arrived · reported ${hm(x.arr)}</span><div class="meta">${durL(Math.max(0, x.arr - r.s.s))} late · no clock-in yet${note}</div>`;
   if (r.cat === 'late' && x.eta != null) return `<span class="pill warn"><i></i>Late · logged in ${first}</span><div class="meta">ETA was ${hm(x.eta)}${r.A && r.A.late ? ' · ' + r.A.late + ' min late' : ''}${note}</div>`;
-  return r.cat === 'noshow' ? `<span class="pill bad"><i></i>No login · no tag</span><div class="meta">${dur(W.clock - r.s.s)} past start</div>`
+  return r.cat === 'noshow' ? `<span class="pill bad"><i></i>No login · no tag</span><div class="meta">${durL(c - r.s.s)} past start</div>`
     : r.cat === 'conflict' ? `<span class="pill warn"><i></i>Tagged absent · logged in ${first}</span><div class="meta">Check the tag</div>`
     : r.cat === 'late' ? `<span class="pill warn"><i></i>Late${r.A && r.A.late ? ' · ' + r.A.late + ' min' : ''}</span><div class="meta">${first ? 'Logged in ' + first : 'Late in (tag)'}</div>`
     : r.full ? `<span class="pill muted"><i></i>Absence recorded</span>` : `<span class="pill muted"><i></i>Part-day leave</span>${first ? `<div class="meta">Logged in ${first}</div>` : ''}`;
@@ -2829,17 +2839,25 @@ function calloutsPanel(day) {
   const all = callouts(day), F = S.co.f, Tm = S.co.t, base = all.filter(r => coIn(r, F)), list = base.filter(r => Tm === 'all' || r.timing === Tm);
   const n = f => all.filter(r => coIn(r, f)).length, tn = t => base.filter(r => r.timing === t).length, D = W.floor.day;
   const id = a => (a.rosterRow || {}).empId || a.empId || '', tl = a => (a.rosterRow || {}).teamLead || (a.tl && a.tl !== '—' ? a.tl : '') || 'No team lead';
-  return `<section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><div class="kicker">Recorded leave · tag review</div><h2>${D === TODAY ? 'Today' : fmtD(D)}'s call-outs · ${all.length} agent${all.length === 1 ? '' : 's'}</h2>
-      <p class="sub">Everyone scheduled with leave recorded, plus anyone who should be in with no login and no tag, anyone tagged absent who logged in, and late logins. Review each tag and fix it here.</p></div>
+  const act = all.filter(r => coIn(r, 'act')).length;
+  return `<section class="panel floorq" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>${act ? `<span class="qn bad">${act}</span> need${act === 1 ? 's' : ''} action now` : '<span class="qn ok">0</span> need action · everyone accounted for'}</h2>
+      <p class="sub">${D === TODAY ? 'Today' : fmtD(D)} · ${all.length} call-out${all.length === 1 ? '' : 's'} in all · most urgent first</p></div>
       <button class="btn" data-a="coCopy">Preview &amp; copy</button></div>
-    <div class="seg" style="flex-wrap:wrap;margin-bottom:8px">${CO_F.map(([k, l]) => `<button class="${F === k ? 'on' : ''}" data-a="coF" data-v="${k}">${l} <span class="num">${n(k)}</span></button>`).join('')}</div>
-    <p class="meta" style="margin-bottom:8px">Update arrival records an ETA (Late / expected → ETA overdue once it passes) or a reported arrival, saved for everyone. A clock-in always wins over a reported time. No login · no tag = past start + ${W.CFG.grace}-min grace with no clock-in and nothing recorded. Late follows the tardiness rule (${esc(W.lateRuleText())}) or a Late in tag. Logins come from the time sheet upload, so a missing upload looks like a no-show: check "Last data".</p>
+    <div class="seg" style="flex-wrap:wrap;margin-bottom:8px">${CO_F.filter(([k]) => ['act','all'].includes(k) || F === k || n(k)).map(([k, l]) => `<button class="${F === k ? 'on' : ''}" data-a="coF" data-v="${k}">${l} <span class="num">${n(k)}</span></button>`).join('')}</div>
+    <details class="how"><summary>How call-outs work</summary><p class="meta">Everyone scheduled with leave recorded, plus anyone who should be in with no login and no tag, anyone tagged absent who logged in, and late logins. Update arrival records an ETA (Late / expected → ETA overdue once it passes) or a reported arrival, saved for everyone. A clock-in always wins over a reported time. No login · no tag = past start + ${W.CFG.grace}-min grace with no clock-in and nothing recorded. Late follows the tardiness rule (${esc(W.lateRuleText())}) or a Late in tag. Logins come from the time sheet upload, so a missing upload looks like a no-show: check "Last data".</p></details>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${[['current', 'Current', 'var(--bad)'], ['later', 'Starts later', 'var(--info,#4ea1ff)'], ['ended', 'Ended', 'var(--muted,#8a94a6)']].map(([k, l, col]) => `<button class="btn sm ${Tm === k ? 'pri' : ''}" data-a="coT" data-v="${k}"><span style="color:${col}">●</span> <b>${tn(k)}</b> ${l}</button>`).join('')}${Tm !== 'all' ? '<button class="btn sm ghost" data-a="coT" data-v="all">Show all</button>' : ''}</div>
     <div class="tw" style="max-height:520px"><table><thead><tr><th>Agent / team lead</th><th>Site / station</th><th>Scheduled shift</th><th>Status / login</th><th>Reason / tag</th><th></th></tr></thead><tbody>
     ${list.map(r => { const sp = r.ab ? tagSrc(r.ab) : null; return `<tr><td><div class="nm"><a href="#" data-a="person" data-v="${r.a.id}" style="color:inherit">${esc(r.a.name)}</a></div><div class="meta">${[id(r.a), tl(r.a)].filter(Boolean).map(esc).join(' · ')}</div></td>
       <td>${esc(W.locOf(r.a) || W.LOCNAME[r.a.site] || r.a.site || '')}<div class="meta">${esc(r.a.station || (W.LOB[r.a.key] || {}).station || lobName(r.a.key))}</div></td><td class="num">${hm(r.s.s)}–${hm(r.s.e)}</td><td>${coStatus(r)}</td>
       <td>${r.ab ? `<b>${esc(r.ab.reason)}</b> <span class="pill ${r.type === 'planned' ? 'info' : 'warn'}">${r.type === 'planned' ? 'Planned' : 'Unplanned'}</span> <span class="pill ${sp[1]}"><i></i>${sp[0]}</span><div class="meta">${[r.ab.remark, r.ab.by && !/shifts/i.test(r.ab.source || '') ? 'by ' + r.ab.by : '', r.ab.at].filter(Boolean).map(esc).join(' · ')}</div>` : '<span class="meta">No reason recorded</span>'}</td>
       <td class="nowrap">${['noshow','overdue','out'].includes(r.cat) ? `<a class="btn sm" target="_blank" rel="noopener" href="https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(r.a.email || '')}" title="Teams chat">Message</a> <button class="btn sm" data-a="alertTL" data-id="${r.a.id}">Alert TL</button> ` : ''}${['noshow','overdue'].includes(r.cat) ? `<button class="btn sm pri" data-a="logAbs" data-id="${r.a.id}" data-d="${r.d}">Tag absence</button> ` : ''}${!r.full ? `<button class="btn sm" data-a="arrOpen" data-id="${r.a.id}" data-d="${r.d}">Update arrival</button> ` : ''}${!['noshow','overdue'].includes(r.cat) && (r.ab || r.cat === 'late') ? `<button class="btn sm" data-a="cell" data-id="${r.a.id}" data-d="${r.d}">Review tag</button>` : ''}</td></tr>`; }).join('') || `<tr><td colspan="6"><div class="empty">${all.length ? 'Nobody in this filter.' : 'No call-outs recorded and nobody missing.'}</div></td></tr>`}</tbody></table></div></section>`;
+}
+/* the floor speaks the account's own time (2026-11-15): one account → its clock; all accounts → each distinct zone once */
+function floorClockText() {
+  const city = z => ({ 'America/Bogota':'Bogotá' })[z] || String(z || '').split('/').pop().replace(/_/g, ' ');
+  if (S.acc !== 'all' && W.ACC[S.acc]) { const k = W.accountClock(S.acc); return `${W.ACC[S.acc].name} ${hm(k.clock)} · ${city(W.zoneOf(S.acc))}`; }
+  const seen = new Map(); W.ACCOUNTS.filter(a => inScope(a.id)).forEach(a => { const z = W.zoneOf(a.id); if (!seen.has(z)) seen.set(z, `${city(z)} ${hm(W.accountClock(a.id).clock)}`); });
+  return [...seen.values()].join(' · ');
 }
 function pLive() {
   Object.entries(OPS.hourlyReferences).forEach(([k,n])=>{if(W.LOB[k])W.LOB[k].minInt=n;});
@@ -2858,22 +2876,23 @@ function pLive() {
   const FL = W.floor, lastDay = W.lastClockDay(), day = floorDay(), dn = k => day.filter(r => r.cat === k).length;
   const started = day.filter(r => !['pending','nodata'].includes(r.cat)), present = day.filter(r => r.present && !r.full).length, absent = day.filter(r => r.full).length;
   const absP = day.filter(r => r.full && r.type === 'planned').length, lateN = dn('late'), noshow = dn('noshow');
-  return loginBanner() + (FL.live ? '' : `<div class="note warn" style="margin-bottom:12px;display:flex;align-items:center;gap:10px"><span style="flex:1"><b>Replaying ${fmtD(FL.day, { weekday:'long', month:'short', day:'numeric' })} at ${hm(c)}.</b> Everything on this page shows the floor as it was at that moment. Live data isn't shown.</span><button class="btn sm pri" data-a="flLive">Back to live</button></div>`) + `<div class="head"><div class="grow"><div class="kicker">${fmtD(FL.day, { weekday:'long', month:'long', day:'numeric' })} · ${hm(c)}${FL.live ? ' · live' : ' · replay'}</div><h1>Live <b>floor</b></h1>
-      <p class="sub">Who is logged in compared with who is scheduled right now. Login source: ${esc(W.CFG.loginSource)}.</p></div>
+  return (FL.live ? '' : `<div class="note warn" style="margin-bottom:12px;display:flex;align-items:center;gap:10px"><span style="flex:1"><b>Replaying ${fmtD(FL.day, { weekday:'long', month:'short', day:'numeric' })} at ${hm(c)}.</b> Everything on this page shows the floor as it was at that moment. Live data isn't shown.</span><button class="btn sm pri" data-a="flLive">Back to live</button></div>`) + `<div class="head"><div class="grow"><h1>Who is working <b>now</b></h1>
+      <p class="sub">${FL.live ? 'Live' : 'Replay of ' + fmtD(FL.day, { weekday:'short', month:'short', day:'numeric' })} · ${esc(floorClockText())} · logins from ${esc(W.CFG.loginSource)}</p></div>
     <div class="flc"><div class="seg">${[['live','Live'],['pick','Pick a time']].map(([k, l]) => `<button class="${(k === 'live') === FL.live ? 'on' : ''}" data-a="${k === 'live' ? 'flLive' : 'flPick'}">${l}</button>`).join('')}</div>
-      <input class="in" type="date" data-f="flDay" value="${FL.day}" max="${TODAY}" aria-label="Floor date">
+      ${FL.live ? '' : `      <input class="in" type="date" data-f="flDay" value="${FL.day}" max="${TODAY}" aria-label="Floor date">
       <button class="btn sm" data-a="flStep" data-v="-60" title="1 hour earlier">−1 h</button><input class="in" type="time" data-f="flTime" value="${hm(c)}" step="300" aria-label="Floor time"><button class="btn sm" data-a="flStep" data-v="60" title="1 hour later">+1 h</button>
       ${lastDay && lastDay !== FL.day ? `<button class="btn sm ghost" data-a="flLast" data-v="${lastDay}" title="Last day with clock-in data">Last data: ${fmtS(lastDay)}</button>` : ''}
-      <input type="range" min="0" max="1435" step="5" value="${c}" data-f="clock" aria-label="Time of day" class="flr"></div></div>
+      <input type="range" min="0" max="1435" step="5" value="${c}" data-f="clock" aria-label="Time of day" class="flr">`}</div></div>
+  ${calloutsPanel(day)}
   <div class="strip">
-    <div><div class="l">Scheduled ${FL.live ? 'today' : 'that day'}</div><div class="v">${day.length}</div><div class="h">${started.length} shifts started by ${hm(c)}</div></div>
+    <div><div class="l">Scheduled ${FL.live ? 'today' : 'that day'}</div><div class="v">${day.length}</div><div class="h">${started.length} shifts started ${FL.live ? 'so far' : 'by ' + hm(c)}</div></div>
     <div><div class="l">Present</div><div class="v ok">${present}</div><div class="h">${fmtPct(pct(present, started.filter(r => !r.full).length))} of started shifts · ${lateN} late</div></div>
     <div><div class="l">Absent</div><div class="v">${absent}</div><div class="h">${absP} planned · ${absent - absP} unplanned${dn('conflict') ? ` · ${dn('conflict')} logged in anyway` : ''}</div></div>
-    <div><div class="l">No-show, no tag</div><div class="v ${noshow ? 'bad' : 'ok'}">${noshow}</div><div class="h">${noshow ? 'Tag them below' : 'Everyone accounted for'}${dn('expected') + dn('overdue') ? ` · ${dn('expected')} late expected, <span style="color:var(--bad)">${dn('overdue')} ETA overdue</span>` : ''}</div></div>
+    <div><div class="l">No-show, no tag</div><div class="v ${noshow ? 'bad' : 'ok'}">${noshow}</div><div class="h">${noshow ? 'Tag them in the queue above' : 'Everyone accounted for'}${dn('expected') + dn('overdue') ? ` · ${dn('expected')} late expected, <span style="color:var(--bad)">${dn('overdue')} ETA overdue</span>` : ''}</div></div>
     <div><div class="l">Not started</div><div class="v">${dn('pending')}</div><div class="h">${dn('nodata') ? dn('nodata') + ' with no login data yet' : 'Shift starts later'}</div></div>
     <div><div class="l">Absence report</div><div class="v">${fmtPct(pct(absent - absP + noshow, day.length))}</div><div class="h">Unplanned + no-show ÷ scheduled</div></div></div>
-  <p class="meta" style="margin:-6px 0 14px"><b>Right now ${hm(c)}:</b> ${onShift.length} on shift · ${logged} logged in (${cnt('inlate')} late) · <span style="color:${cnt('late') ? 'var(--bad)' : 'inherit'}">${cnt('late')} not logged in</span> · ${cnt('out')} logged out mid-shift · adherence ${fmtPct(pct(A.i, A.s))}</p>
-  ${calloutsPanel(day)}
+  <p class="meta" style="margin:-6px 0 14px"><b>${FL.live ? 'Right now' : 'At ' + hm(c)}:</b> ${onShift.length} on shift · ${logged} logged in (${cnt('inlate')} late) · <span style="color:${cnt('late') ? 'var(--bad)' : 'inherit'}">${cnt('late')} not logged in</span> · ${cnt('out')} logged out mid-shift · adherence ${fmtPct(pct(A.i, A.s))}</p>
+  ${loginBanner()}
   <details class="panel" style="margin-bottom:14px" ${S.liveSt ? 'open' : ''} ontoggle="S.liveSt = this.open"><summary style="cursor:pointer"><b>Scheduled vs present vs absent · by location and station</b> <span class="meta">· ${byLob.length} stations · ${byLob.filter(x => x.sched && x.logged < x.l.minInt).length} below configured reference now · click to ${S.liveSt ? 'hide' : 'show'}</span></summary><div class="panel-h" style="margin-top:8px"><div class="grow"><p class="sub">Day columns: everyone scheduled ${FL.live ? 'today' : 'that day'}. Present % = present ÷ shifts started (leave excluded). Now columns compare logged-in people with a configured hourly reference. This is a staffing setting, not a workload or volume forecast. A negative difference does not mean people have left. Logins from ${esc(W.CFG.loginSource)}, grace ${W.CFG.grace} min.</p></div></div>
     <div class="tw"><table><thead><tr><th>Station</th><th class="n">Scheduled</th><th class="n">Present</th><th class="n">Absent</th><th class="n">No-show</th><th class="n">Late</th><th class="n">Present %</th><th class="n" style="border-left:1px solid var(--line)">On shift now</th><th class="n">Logged in now</th><th class="n">Hourly reference</th><th class="n">Difference from reference</th><th class="n">Scheduled hours worked</th></tr></thead><tbody>
     ${bySite(byLob.map(x => ({ ...x.l, _x:x })), L => { const x = L._x, gap = x.logged - x.l.minInt; const dy = day.filter(r => r.a.key === x.l.key), st = dy.filter(r => !['pending','nodata'].includes(r.cat) && !r.full), pr = dy.filter(r => r.present && !r.full).length, ns = dy.filter(r => r.cat === 'noshow').length;
@@ -3403,7 +3422,7 @@ function pOverview() {
   const T = rows.reduce((o, r) => { ['hc','sched','on','logged','miss','leave','pend','risk','over'].forEach(k => o[k] = (o[k] || 0) + r[k]); return o; }, {});
   const noSch = OV_CACHE.noSch ?? (OV_CACHE.noSch = W.scheduleAudit(addD(weekStart(TODAY), 7), {}).filter(x => inScope(x.a.acc) && (S.acc === 'all' || x.a.acc === S.acc) && x.issues.some(i => i.k === 'none')).length);
   const { At, Ht } = OV_CACHE.tot || (OV_CACHE.tot = { At:W.absStats({ from:from4, to:TODAY, acc:accs.length === 1 ? accs[0].id : 'all' }).T, Ht:W.adhStats({ from:addD(TODAY, -6), to:TODAY, acc:accs.length === 1 ? accs[0].id : 'all' }).T });
-  return `<div class="head"><div class="grow"><div class="kicker">${fmtD(W.floor.day, { weekday:'long', month:'long', day:'numeric' })} · ${hm(W.clock)} · ${esc(W.floor.zone)} · ${accs.length} account${accs.length > 1 ? 's' : ''}</div><h1>Corporate <b>overview</b></h1><p class="sub">One line per account. ABS = last 4 weeks, adherence = last 7 days, schedule checks = next 14 days. Click an account to open its live floor.</p></div></div>
+  return `<div class="head"><div class="grow"><h1>Corporate <b>overview</b></h1><p class="sub">One line per account. ABS = last 4 weeks, adherence = last 7 days, schedule checks = next 14 days. Click an account to open its live floor.</p></div></div>
   ${(n => n ? `<div class="alarm" style="display:flex;align-items:center;gap:12px"><span class="pulse"></span><div class="grow"><b>${n} inactive ${n > 1 ? 'people are' : 'person is'} still scheduled in Shifts.</b> <span class="sub">They're already left out of ABS, adherence and coverage.</span></div><button class="btn sm" data-a="goInactive">Review</button></div>` : '')(W.inactiveFlags({ acc:S.acc }).filter(x => inScope(x.a.acc) && x.futureShifts > 0).length)}
   <div class="strip">
     <div><div class="l">Active HC</div><div class="v">${T.hc}</div><div class="h">${T.sched} scheduled today</div></div>
@@ -5516,6 +5535,7 @@ const A = {
       `<button class="btn" data-a="close">Cancel</button><button class="btn bad" data-a="accRemoveGo" data-v="${a.id}">Remove account</button>`); },
   accRemoveGo: el => { const a = W.ACC[el.dataset.v]; if ($('arConf').value.trim().toLowerCase() !== a.name.toLowerCase()) { $('arConf').focus(); return toast('Type the account name exactly to confirm'); }
     W.removeAccount(a.id, $('arWhy').value.trim()); dbArchiveAccount(a.id, true); if (S.acc === a.id) S.acc = 'all'; close(); toast(`${a.name} removed · archived, can be restored`); render(); },
+  clockOpen: () => open('Display clock', timeZonePanel(), '<button class="btn pri" data-a="close">Done</button>'),
   accRestore: el => { W.restoreAccount(el.dataset.v); dbArchiveAccount(el.dataset.v, false); toast(`${W.ACC[el.dataset.v].name} restored`); render(); },
   naCheck: async () => { const n = S.na = { ...(S.na || {}) }, id = W.parseTeamId(n.link || '');
     const say = (ok, msg) => { S.na = { ...S.na, busy:false, check:{ ok, msg } }; render(); };
