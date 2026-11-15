@@ -3056,13 +3056,16 @@ function scheduleDetail(id,d) {
  open(`${esc(a.name)} · ${fmtD(d)}`,`<dl class="kv"><dt>Saved original</dt><dd>${p?esc(W.shiftLabel(p.code)):'Not saved'}</dd><dt>Current in tool</dt><dd>${esc(W.shiftLabel(current.code))}</dd><dt>Teams time zone</dt><dd>${esc(W.zoneOf(a.acc))}</dd>${conflict?`<dt>Teams currently</dt><dd>${esc(conflict.shiftsLbl)} · ${esc(CHK_TYPES[conflict.type][0])} · review before sending</dd>`:''}</dl><h3>Changes recorded</h3>${events.map(x=>`<p><b>${esc(x.kind)}</b> · ${esc(x.at)} · ${esc(x.by)}<br>${esc(x.before)} → ${esc(x.after)}<br>${esc(x.reason||'No reason supplied by Teams')}</p>`).join('')||'<p>No changes recorded for this day.</p>'}<p class="meta">Reading Teams never sends a change back. Edit schedules is the place to prepare changes.</p><button class="btn" data-a="go" data-v="builder">Edit schedules</button>`);
 }
 let scheduleReadBusy=false;
+/* Refresh from Teams: asks the server to read the account in view (All accounts = every account in scope). The server reads ONE account
+   at a time (2026-11-16: five reads at once = 40 reader calls together, every one 504), so the rest wait in its queue a minute or so each. */
 async function refreshScheduleReads() {
  if(scheduleReadBusy||!DB.on||!S.auth)return;
  scheduleReadBusy=true;render();
- try{const accs=W.LIVE.accs.filter(inScope),res=await Promise.all(accs.map(a=>dbFeedNow(a).then(r=>[a,r])));
-  const started=res.filter(x=>x[1]==='started').map(x=>W.ACC[x[0]].name),busy=res.filter(x=>x[1]==='busy').map(x=>W.ACC[x[0]].name),bad=res.filter(x=>!['started','busy'].includes(x[1]));
-  toast(started.length?`Reading Teams Shifts on the server for ${started.join(', ')} · updates here in about a minute`:busy.length?`${busy.join(', ')} ${busy.length===1?'was':'were'} read in the last 2 minutes · the newest read shows here automatically`:'Refresh not available: '+(bad[0]?bad[0][1]:'no accounts'));
-  for(const wait of [25,20,20,30,30]){await new Promise(r=>setTimeout(r,wait*1000));await feedPoll();}
+ try{const accs=W.LIVE.accs.filter(inScope).filter(a=>S.acc==='all'||a===S.acc),res=await Promise.all(accs.map(a=>dbFeedNow(a).then(r=>[a,r]))),nm=st=>res.filter(x=>x[1]===st).map(x=>W.ACC[x[0]].name);
+  const started=nm('started'),queued=nm('queued'),busy=nm('busy'),bad=res.filter(x=>!['started','queued','busy'].includes(x[1]));
+  toast(started.length||queued.length?[started.length?'Reading '+started.join(', ')+' now':'',queued.length?(started.length?'then ':'Queued: ')+queued.join(', ')+' (the server reads one account at a time, under a minute each)':''].filter(Boolean).join(' · ')+' · this page updates by itself'
+   :busy.length?`${busy.join(', ')} ${busy.length===1?'was':'were'} read in the last 2 minutes · the newest read shows here automatically`:'Refresh not available: '+(bad[0]?bad[0][1]:'no accounts'));
+  for(const wait of [20,20,20,30,30,40,40,40]){await new Promise(r=>setTimeout(r,wait*1000));await feedPoll();}
  }finally{scheduleReadBusy=false;render();}
 }
 /* 'live' (Who is working now + call-outs) too: time off entered in Shifts during the day shows there without a reload (2026-11-05) */
