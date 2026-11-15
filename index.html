@@ -13,7 +13,7 @@
   --acc:#0bd1ff; --acc-ink:#04131c; --pri:#006EF2; --pri2:#0a5fd0;
   --ok:#3ccf91; --oks:rgba(60,207,145,.13); --warn:#f5b84a; --warns:rgba(245,184,74,.14); --bad:#ff6b77; --bads:rgba(255,107,119,.14); --info:#6aa8ff; --infos:rgba(106,168,255,.14);
   --e:#1aa6b7; --d:#2f6fe0; --m:#6a5ae0; --a:#a557d6; --n:#46566f;
-  --serif:ui-serif,Georgia,Cambria,"Times New Roman",serif; --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --r:14px; color-scheme:dark;
 }
 :root[data-theme="light"]{
@@ -28,7 +28,7 @@ body{background:var(--bg);color:var(--ink);font:13.5px/1.45 var(--sans);-webkit-
 button,input,select,textarea{font:inherit;color:inherit}
 .num,td.n{font-variant-numeric:tabular-nums}
 td.n,th.n{text-align:right}
-h1{font:300 30px/1.15 var(--serif);margin:0;letter-spacing:-.01em}
+h1{font:300 30px/1.15 var(--sans);margin:0;letter-spacing:-.01em}
 h1 b{font-weight:600;color:var(--acc)}
 h1 i{font-style:italic}
 h2{font-size:14px;margin:0;font-weight:600}
@@ -45,7 +45,7 @@ h2{font-size:14px;margin:0;font-weight:600}
 .si-logo{font-weight:700;font-size:18px;display:flex;gap:10px;align-items:center}
 .si-logo span{font-weight:300}
 .mark{width:26px;height:22px;display:inline-block}
-.si-copy h2{font:300 40px/1.18 var(--serif);margin:0 0 18px;letter-spacing:-.01em}
+.si-copy h2{font:300 40px/1.18 var(--sans);margin:0 0 18px;letter-spacing:-.025em}
 .si-copy h2 b{font-weight:600;color:#a5f0ff}
 .si-copy h2 i{color:#d8e5ff}
 .si-copy p{font-size:17px;color:#dbe6f5;max-width:460px;margin:0 0 6px;opacity:.9}
@@ -137,7 +137,7 @@ tr.tot td{font-weight:700;border-top:1px solid var(--line2)}
 .empty{color:var(--ink3);text-align:center;padding:28px 10px}
 .note{font-size:12.5px;color:var(--ink2);border-left:2px solid var(--acc);padding:6px 10px;background:var(--panel2);border-radius:0 8px 8px 0}
 .note.bad{border-color:var(--bad)} .note.warn{border-color:var(--warn)}
-.q{font:italic 300 14px/1.5 var(--serif);color:var(--ink2);border-left:2px solid var(--line2);padding-left:10px;margin:8px 0}
+.q{font:400 13.5px/1.5 var(--sans);color:var(--ink2);border-left:2px solid var(--line2);padding-left:10px;margin:8px 0}
 .foot-note{font-size:11.5px;color:var(--ink3);margin-top:10px;line-height:1.55}
 
 /* shift codes & absence tags */
@@ -197,7 +197,7 @@ tr.tot td{font-weight:700;border-top:1px solid var(--line2)}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--panel);border-left:1px solid var(--line2);z-index:41;transform:translateX(100%);transition:transform .2s;display:flex;flex-direction:column}
 .drawer.on{transform:none}
 .drawer header{display:flex;gap:10px;align-items:center;padding:16px 18px;border-bottom:1px solid var(--line)}
-.drawer header h2{flex:1;font:400 20px/1.2 var(--serif)}
+.drawer header h2{flex:1;font:400 20px/1.2 var(--sans)}
 .drawer .body{padding:16px 18px;overflow:auto;flex:1}
 .drawer footer{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);opacity:0;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:600;z-index:60;transition:.2s;pointer-events:none}
@@ -588,6 +588,7 @@ td.c,th.c{text-align:center;padding-left:3px;padding-right:3px}
 td.iss .pill{white-space:normal;margin:1px 0}
 .strip .l{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3}
 .tw.tall{max-height:560px;overflow:auto}
+.tm-send{margin-top:4px}
 details.how{margin:0 0 10px}details.how>summary{cursor:pointer;color:var(--ink3);font-size:12.5px;font-weight:600}details.how>summary:hover{color:var(--ink)}details.how p{margin:6px 0 0}
 .side .foot{background:color-mix(in srgb,var(--ground) 94%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--glass-line);margin-top:auto;z-index:2}
 .pendbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--tintA) 45%,transparent);background:color-mix(in srgb,var(--tintA) 12%,var(--glass))}
@@ -2979,7 +2980,7 @@ function reqDetail(r) {
   const ad = W.adhStats({ from:addD(TODAY, -30), to:TODAY, lob:a.key }).byAg.find(g => g.a.id === a.id);
   const other = W.REQ.filter(x => x.agent === a.id && x.id !== r.id && x.status !== 'Denied' && x.to >= TODAY);
   return `<section class="panel">
-    <div class="panel-h"><span class="av" style="width:42px;height:42px;font-size:14px">${initials(a.name)}</span><div class="grow"><h2 style="font:400 22px/1.2 var(--serif)">${esc(a.name)}</h2><p class="sub">${a.id} · ${esc(lobName(a.key))} · TL ${esc(a.tl)} · Pattern ${esc(W.PATTERNS[W.patOn(a, r.from).p].name)}</p></div>${r.status === 'Pending' ? vPill(worst) : ''}</div>
+    <div class="panel-h"><span class="av" style="width:42px;height:42px;font-size:14px">${initials(a.name)}</span><div class="grow"><h2 style="font:600 18px/1.25 var(--sans)">${esc(a.name)}</h2><p class="sub">${a.id} · ${esc(lobName(a.key))} · TL ${esc(a.tl)} · Pattern ${esc(W.PATTERNS[W.patOn(a, r.from).p].name)}</p></div>${r.status === 'Pending' ? vPill(worst) : ''}</div>
     <dl class="kv"><dt>Request</dt><dd><b>${esc(r.reason)}</b> · ${r.dates.map(d => fmtD(d)).join(', ')}</dd><dt>Source</dt><dd>${r.id} · Microsoft Teams · ${esc(r.received)}</dd>
       ${r.status !== 'Pending' ? `<dt>Decision</dt><dd>${esc(r.status)} by ${esc(r.decidedBy)} · ${esc(r.decidedAt)}${r.decisionNote ? ' · ' + esc(r.decisionNote) : ''}</dd>` : ''}</dl>
     ${r.note ? `<div class="q">“${esc(r.note)}”</div>` : ''}
@@ -3376,8 +3377,9 @@ function pAudit() {
 function pSettings() {
   return `<div class="head"><div class="grow"><div class="kicker">Microsoft 365 · rules · publishing</div><h1><b>Settings</b></h1><p class="sub">Every change here is written to the audit trail.</p></div></div>
   <div class="cols c2">
-    <section class="panel"><div class="panel-h"><div class="grow"><h2>Microsoft Teams &amp; Shifts</h2><p class="sub">Bridge: Power Automate flows run by the WFM service account. No Azure app registration needed.</p></div><span class="pill ok"><i></i>Connected</span></div>
-      <table><thead><tr><th>Account</th><th>Shifts team</th><th>Leave requests</th><th>Schedules</th></tr></thead><tbody>${W.ACCOUNTS.map(a => `<tr><td class="nm">${esc(a.name)}</td><td>${esc(a.team)}</td><td><span class="pill ok"><i></i>Listening</span></td><td><span class="pill ok"><i></i>Publishing</span></td></tr>`).join('')}</tbody></table>
+    <section class="panel"><div class="panel-h"><div class="grow"><h2>Microsoft Teams &amp; Shifts</h2><p class="sub">Bridge: Power Automate flows run by the WFM service account. No Azure app registration needed.</p></div>${CONN.readUrl && CONN.pubUrl ? '<span class="pill ok"><i></i>Connected</span>' : '<span class="pill warn"><i></i>Check Connected services</span>'}</div>
+      <table><thead><tr><th>Account</th><th>Shifts team</th><th>Reading</th><th>Schedules</th></tr></thead><tbody>${W.ACCOUNTS.map(a => `<tr><td class="nm">${esc(a.name)}</td><td>${esc(a.team)}</td><td>${sendState(a.id).read ? '<span class="pill ok"><i></i>Reading</span>' : '<span class="pill muted"><i></i>Off</span>'}</td><td>${sendPill(a.id)}</td></tr>`).join('')}</tbody></table>
+      <p class="meta" style="margin-top:6px">Reading and sending are switched on per account in Connected services → Shifts reader &amp; publishing controls.</p>
       <div class="field" style="margin-top:14px"><label class="f" for="setSrc">Login source for adherence</label><p class="foot-note">This setting names the attendance source used by Who is working now and Attendance &amp; work hours. Selecting a source does not connect it, download data or replace clock-in records that are already imported. Import the file or configure the connection first. Teams presence shows availability, not confirmed work time.</p><select class="in" id="setSrc" data-f="src" style="width:100%">${['Imported ACD export','Shifts time clock','Teams presence','ACD / phone login export'].map(x => `<option ${W.CFG.loginSource === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
         <p class="foot-note">Shifts time clock = agents clock in and out in Teams. Teams presence shows "Available" even when the agent isn't working, so it is less accurate. ACD export = upload the account's phone-system login report.</p></div>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-f="auto" ${W.CFG.autoPublish ? 'checked' : ''}> Publish schedule changes to Shifts automatically</label></section>
@@ -3997,9 +3999,9 @@ function teamMapPanel(ed) {
         <td><select class="in" data-f="tm" data-k="station" data-v="${r.id}" aria-label="Station" ${dis}><option value="*">*</option>${sts.map(s => `<option ${s === r.station ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></td>
         <td><input class="in" id="tmN_${r.id}" data-f="tm" data-k="team" data-v="${r.id}" value="${esc(r.team)}" title="${esc(r.team)}" placeholder="e.g. Crane Worldwide Logistics" aria-label="Shifts team name" ${dis}></td>
         <td><input class="in mono" id="tmI_${r.id}" data-f="tm" data-k="teamId" data-v="${r.id}" value="${esc(r.teamId)}" title="${esc(r.teamId)}" placeholder="groupId or team link" aria-label="Team ID" ${dis}></td>
-        <td>${pill(x)}${x.shared ? `<div class="meta">Also used by ${esc(W.TEAM_MAP.filter(y => y.acc !== r.acc && y.teamId === r.teamId && W.ACC[y.acc]).map(y => W.ACC[y.acc].name).join(', '))}</div>` : ''}</td>
+        <td>${pill(x)}${x.shared ? `<div class="meta">Also used by ${esc(W.TEAM_MAP.filter(y => y.acc !== r.acc && y.teamId === r.teamId && W.ACC[y.acc]).map(y => W.ACC[y.acc].name).join(', '))}</div>` : ''}<div class="tm-send">${sendPill(r.acc, true)}</div></td>
         <td>${ed ? `<button class="btn sm bad" data-a="tmDel" data-v="${r.id}" aria-label="Remove this team">✕</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="7"><div class="empty">No Shifts teams mapped. Add one.</div></td></tr>'}</tbody></table></div>
-    <p class="foot-note">Every schedule change and PTO decision is sent to the team of the row that matches the person's site and station. The publishing log shows which team each job went to.</p></section>`;
+    <p class="foot-note">Every schedule change and leave decision is sent to the team of the row that matches the person's site and station. The second line of Status shows whether the account is ticked in Accounts allowed to send schedules: a mapped team receives nothing until it is. The publishing log shows which team each job went to.</p></section>`;
 }
 
 /* ---------- ACCOUNTS + INACTIVE (tabs in Roster & Teams) ---------- */
@@ -4100,7 +4102,7 @@ function swapDetail(sw) {
     return `<td style="text-align:center;${ch ? 'background:color-mix(in srgb,var(--acc) 12%,transparent)' : ''}">${now.absence ? abTag(now.absence.reason) : W.ui.shift(now.code)}${ch ? `<div style="font-size:10px;color:var(--ink3)">↓</div>${W.ui.shift(nx)}` : ''}</td>`; }).join('')}</tr>`;
   const monthN = ag => W.SWAPS.filter(x => x.status === 'Approved' && (x.a === ag.id || x.b === ag.id) && x.da.slice(0, 7) === TODAY.slice(0, 7)).length;
   const pend = sw.status === 'Pending approval';
-  return `<section class="panel"><div class="panel-h"><div class="grow"><h2 style="font:400 22px/1.2 var(--serif)">${esc(A.name)} ⇄ ${esc(B.name)}</h2><p class="sub">${sw.id} · ${SWT[sw.type]} · requested by ${esc(A.name.split(' ')[0])}, ${sw.status === 'Waiting for coworker' ? 'not yet accepted by ' + esc(B.name.split(' ')[0]) : 'accepted by ' + esc(B.name.split(' ')[0])} · ${esc(sw.received)}</p></div>
+  return `<section class="panel"><div class="panel-h"><div class="grow"><h2 style="font:600 18px/1.25 var(--sans)">${esc(A.name)} ⇄ ${esc(B.name)}</h2><p class="sub">${sw.id} · ${SWT[sw.type]} · requested by ${esc(A.name.split(' ')[0])}, ${sw.status === 'Waiting for coworker' ? 'not yet accepted by ' + esc(B.name.split(' ')[0]) : 'accepted by ' + esc(B.name.split(' ')[0])} · ${esc(sw.received)}</p></div>
       ${pend ? `<span class="pill ${chk[C.result][1]}">${({pass:'Passes all rules', warn:'Check warnings', fail:'Breaks a rule'})[C.result]}</span>` : `<span class="pill ${sw.status === 'Approved' ? 'ok' : sw.status === 'Declined' ? 'bad' : 'muted'}">${esc(sw.status)}</span>`}</div>
     ${sw.note ? `<div class="q">“${esc(sw.note)}”</div>` : ''}
     <h2 style="margin:14px 0 6px">${sw.status === 'Approved' ? 'Schedule after the swap' : 'Before ↓ after'}</h2>
@@ -4149,7 +4151,9 @@ function rollDrawer() {
 const CONN = (() => { const cfg = window.WFT_CONFIG || {}, withCfg = c => { ['dbUrl','dbKey'].forEach(k => { if (cfg[k] && !/PASTE_/.test(cfg[k])) c[k] = cfg[k]; }); c.standalone=cfg.standalone===true; if(cfg.flowUrl&&!c.flowUrl)c.flowUrl=cfg.flowUrl; return c; }; const d = { inUrl:'', toWindow:'allday', theme:'Purple', inTest:null, dbUrl:'https://xrzpbkilkswyflzagcfw.supabase.co', dbKey:'', flowUrl:'', autoSend:true, teams:{ CRN:'7fd45419-003c-4a9f-b2c3-1b88c7b65702', ONT:'c6cb7bb2-8512-483d-8c67-fecbecf31ed2', RIV:'a1f3c21e-3bb2-4794-8ab9-bb83a350f613' }, dbTest:null, flowTest:null };
   try { const s = JSON.parse(localStorage.getItem('wft.conn') || '{}'); if ('flowUrl' in s || 'pubUrl' in s || 'readUrl' in s) { delete s.flowUrl; delete s.pubUrl; delete s.readUrl; localStorage.setItem('wft.conn', JSON.stringify(s)); } /* flow links cached by older builds are wiped from this browser on load */ const t = { ...d.teams }; Object.entries(s.teams || {}).forEach(([k, v]) => { if (v) t[k] = v; }); return withCfg({ ...d, ...s, teams:t, dbTest:null, flowTest:null }); } catch (e) { return withCfg({ ...d }); } })();
 (() => {   // Shifts team mapping: saved rows win; older saves only had one team ID per account
-  if (Array.isArray(CONN.teamMap) && CONN.teamMap.length) W.TEAM_MAP.splice(0, W.TEAM_MAP.length, ...CONN.teamMap.filter(r => r && r.acc && r.id));
+  if (Array.isArray(CONN.teamMap) && CONN.teamMap.length) { const def = W.TEAM_MAP.slice(); W.TEAM_MAP.splice(0, W.TEAM_MAP.length, ...CONN.teamMap.filter(r => r && r.acc && r.id));
+    /* an account added after the mapping was saved (NFI BAQ / BOG) keeps its own team as an All sites row, the same team publishing already falls back to */
+    def.filter(r => !W.TEAM_MAP.some(x => x.acc === r.acc)).forEach(r => W.TEAM_MAP.push(r)); }
   else Object.entries(CONN.teams || {}).forEach(([acc, id]) => { const r = W.TEAM_MAP.find(x => x.acc === acc && x.site === '*' && x.station === '*'); if (r && W.parseTeamId(id)) r.teamId = W.parseTeamId(id); });
 })();
 /* ---------- Supabase: real sign-in, roles from wft_profiles, audit trail saved server-side ---------- */
@@ -4550,6 +4554,16 @@ async function pubChangedDays(a, run, teamId) {
 }
 /* two-way Shifts check (accounts enabled for publishing): read the team, compare per person-day, take Shifts' version where Shifts is newer */
 /* accounts whose people, stations and schedules come straight from their Shifts team (reader flow). Crane comes from the portal feed. */
+const GUIDRX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/* does this account read from Shifts, send to Shifts (live / preview / off), and does it have a Shifts team to send to */
+function sendState(id) {
+  const P = pilotCfg(), on = P.accounts.includes(id), mode = !on ? 'off' : ((P.mode || {})[id] || 'live') === 'dry' ? 'preview' : 'live';
+  const team = W.TEAM_MAP.some(r => r.acc === id && GUIDRX.test(r.teamId || '')) || GUIDRX.test((W.ACC[id] || {}).teamId || '');
+  return { read:readAccs().includes(id), mode, team };
+}
+const sendPill = (id, short) => { const x = sendState(id);
+  return x.mode === 'off' ? `<span class="pill muted" title="Not ticked in Connected services → Accounts allowed to send schedules"><i></i>Not sending</span>`
+    : !x.team ? '<span class="pill bad"><i></i>No Shifts team</span>' : x.mode === 'preview' ? '<span class="pill info"><i></i>Preview only</span>' : `<span class="pill ok"><i></i>${short ? 'Live' : 'Publishing'}</span>`; };
 const readAccs = () => { const P = CONN.pilot || {}; return (P.read || (P.accounts || []).filter(x => x === 'ONT')).filter(x => (CONN.standalone || x !== 'CRN') && W.ACC[x]); };
 function cacheNotice(){const cached=Object.entries(DB.teams||{}).filter(([acc,x])=>x.cachedAt&&x.st!=='ok'&&(S.acc==='all'||S.acc===acc));return cached.length?`<p class="note">Showing saved data while Teams Shifts loads: ${cached.map(([acc,x])=>esc(W.ACC[acc].name)+' ('+(x.feedAt?'Shifts read '+Math.max(0,Math.round((Date.now()-Date.parse(x.feedAt))/60000))+' min ago':'snapshot '+esc(new Date(x.cachedAt).toLocaleString()))+')').join(', ')}. Teams refresh ${cached.some(([,x])=>x.st==='failed')?'failed; these records may be stale':'is running'}.</p>`:'';}
 /* Crane's full snapshot is ~15 MB of JSON: saving it as jsonb hit the database statement timeout. Snapshots over 1 MB are saved gzipped
@@ -4838,7 +4852,7 @@ function connStatusPanel() {
     ['Reading from Shifts (reader flow)', !C.readUrl ? 'bad' : failRead.length ? 'bad' : 'ok', !C.readUrl ? 'No reader link. Paste it in Receiving from Shifts below.' : `${accs.length} account${accs.length === 1 ? '' : 's'} read from Shifts${okRead.length < accs.length ? ` · ${okRead.length} loaded so far` : ''}${failRead.length ? ' · failed: ' + failRead.map(a => W.ACC[a].name + ' (' + ((T[a] || {}).why || '') + ')').join(', ') : ''}.`],
     ['Server feed (Supabase, every 30 min)', DB.feedRows === undefined ? 'warn' : !feed.length ? 'warn' : feed.some(f => !f.ok) || fresh.length < feed.length || feedMissing.length ? 'warn' : 'ok',
       DB.feedRows === undefined ? 'Checking…' : DB.feedErr ? 'Not readable: ' + DB.feedErr : feed.map(f => `${(W.ACC[f.account_id] || { name:f.account_id }).name} ${f.ok ? ago(f.read_at) : 'failed: ' + (f.error || '')}`).join(' · ') + (feedMissing.length ? ' · not read yet: ' + feedMissing.map(a => W.ACC[a].name).join(', ') + ' (new accounts join the next round)' : '')],
-    ['Publishing to Shifts', !C.pubUrl ? 'bad' : (P.accounts || []).length ? 'ok' : 'off', !C.pubUrl ? 'No publishing link. Paste it in Sending to Shifts below.' : (P.accounts || []).length ? 'Publishes for ' + P.accounts.map(a => (W.ACC[a] || { name:a }).name).join(', ') + (P.mode === 'dry' ? ' (preview only)' : '') + '.' : 'Link set, but no account publishes yet. Tick accounts in the controls below.'],
+    ['Publishing to Shifts', !C.pubUrl ? 'bad' : (P.accounts || []).some(a => W.ACC[a] && !sendState(a).team) ? 'warn' : (P.accounts || []).length ? 'ok' : 'off', !C.pubUrl ? 'No publishing link. Paste it in Sending to Shifts below.' : (P.accounts || []).length ? 'Publishes for ' + P.accounts.filter(a => W.ACC[a]).map(a => { const x = sendState(a); return W.ACC[a].name + (!x.team ? ' (no Shifts team)' : x.mode === 'preview' ? ' (preview only)' : ''); }).join(', ') + '.' + (W.ACCOUNTS.some(a => !P.accounts.includes(a.id)) ? ' Not sending: ' + W.ACCOUNTS.filter(a => !P.accounts.includes(a.id)).map(a => a.name).join(', ') + '.' : '') : 'Link set, but no account publishes yet. Tick accounts in the controls below.'],
     ['Time off to Shifts (PTO flow)', C.flowUrl ? 'ok' : 'warn', C.flowUrl ? 'Approved leave is sent to Shifts.' : 'No PTO flow link: leave stays in the tool only.'],
   ];
   return `<section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>Status at a glance</h2><p class="sub">Everything below is set up once. If a row isn't OK, its note says what to do.</p></div></div>
@@ -4884,7 +4898,7 @@ ${DB.on ? '' : '<div class="note warn" style="margin-bottom:10px"><b>Local test 
     <div class="field"><label class="f">Read from Shifts (people, stations and schedules)</label>${W.ACCOUNTS.map(a => { const on = (CONN.standalone || a.id !== 'CRN') && pilDraft().read.includes(a.id), t = (DB.teams || {})[a.id];
         return `<label style="display:inline-flex;gap:6px;margin-right:16px;align-items:center"><input type="checkbox" data-f="pilRead" value="${a.id}" ${on ? 'checked' : ''} ${a.id === 'CRN'&&!CONN.standalone ? 'disabled' : ''}> ${esc(a.name)}${a.id === 'CRN'&&!CONN.standalone ? ' <span class="meta">(portal feed)</span>' : t ? ` <span class="pill ${t.st === 'ok' ? 'ok' : t.st === 'failed' ? 'bad' : 'info'}">${t.st === 'ok' ? `${t.people} people · ${t.stations} stations` : t.st === 'failed' ? 'Failed' : 'Loading…'}</span>` : ''}</label>`; }).join('')}
       <p class="foot-note">Reading never changes Shifts. A ticked account loads its people from its Shifts team at sign-in (in the background), so its team mapping row gets people and its schedules show in the tool. Publishing is separate, below.</p></div>
-    <div class="field"><label class="f">Accounts allowed to send schedules</label>${W.ACCOUNTS.map(a => `<label style="display:inline-flex;gap:6px;margin-right:16px"><input type="checkbox" class="cPilot" data-f="pilAcc" value="${a.id}" ${pilDraft().accounts.includes(a.id) ? 'checked' : ''}> ${esc(a.name)}</label>`).join('')}
+    <div class="field"><label class="f">Accounts allowed to send schedules</label>${W.ACCOUNTS.map(a => `<label style="display:inline-flex;gap:6px;margin-right:16px"><input type="checkbox" class="cPilot" data-f="pilAcc" value="${a.id}" ${pilDraft().accounts.includes(a.id) ? 'checked' : ''}> ${esc(a.name)}${pilDraft().accounts.includes(a.id) && !sendState(a.id).team ? ' <span class="pill bad">No Shifts team: add one in Shifts team mapping</span>' : ''}</label>`).join('')}
       ${pilDraft().accounts.map(id => pilotRow(id)).join('')}
       <p class="foot-note">New accounts appear here after being added, but must be selected and configured before any live sending. Selected accounts are read from and published to Shifts in their account time zone (Settings → Account time zones). Everything else stays "Not sent" until it's ticked here. Use the v2 publish flow: it replaces overnight shifts and duplicates correctly.</p></div>
     <div style="display:flex;justify-content:flex-end"><button class="btn pri" data-a="cPilotSave">Save</button></div></section>` : ''}
