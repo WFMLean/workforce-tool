@@ -2560,7 +2560,7 @@ function a11yPass(root) {
 function render() {
   W.refreshFloor(); Object.entries(OPS.hourlyReferences).forEach(([k,n])=>{if(W.LOB[k])W.LOB[k].minInt=n;});
   const previousTimeline=$('gwrap'),timelinePosition=previousTimeline?{left:previousTimeline.scrollLeft,top:previousTimeline.scrollTop,day:previousTimeline.dataset.day,scope:previousTimeline.dataset.scope}:null;
-  const pickerScroll=document.querySelector('.spk-l')?.scrollTop || 0, gridPos=$('bgrid')?{top:$('bgrid').scrollTop,left:$('bgrid').scrollLeft}:null;
+  const sideTop=document.querySelector('nav.side')?.scrollTop || 0, pickerScroll=document.querySelector('.spk-l')?.scrollTop || 0, gridPos=$('bgrid')?{top:$('bgrid').scrollTop,left:$('bgrid').scrollLeft}:null;
   const fid = document.activeElement && document.activeElement.id, sel = fid && document.activeElement.selectionStart;
   if (isPhone()) { $('root').innerHTML = phoneBlock(); return; }
   document.documentElement.dataset.acc = S.auth ? S.acc : 'all';   // glass ground takes the selected account's colour
@@ -2576,7 +2576,9 @@ function render() {
   });
   if (S.auth && !['home','help'].includes(S.page)) { const heading = document.querySelector('#main h1'); if (heading) heading.textContent = pageName(S.page); }
   const nextTimeline=$('gwrap');if(timelinePosition&&nextTimeline&&nextTimeline.dataset.day===timelinePosition.day&&nextTimeline.dataset.scope===timelinePosition.scope){nextTimeline.scrollLeft=timelinePosition.left;nextTimeline.scrollTop=timelinePosition.top;}
-  if(gridPos&&$('bgrid')){$('bgrid').scrollTop=gridPos.top;$('bgrid').scrollLeft=gridPos.left;}   // ticking person #150 keeps the Week grid where it was
+  if(gridPos&&$('bgrid')){$('bgrid').scrollTop=gridPos.top;$('bgrid').scrollLeft=gridPos.left;}
+  { const sd = document.querySelector('nav.side'), on = sd && sd.querySelector('button.nav.on'); if (sd) { sd.scrollTop = sideTop;   // the sidebar is rebuilt each render: keep its place, and keep the open page visible above the footer
+    if (on) { const r = on.getBoundingClientRect(), ft = sd.querySelector('.foot'), lim = ft && getComputedStyle(ft).display !== 'none' ? ft.getBoundingClientRect().top : innerHeight; if (r.bottom > lim) sd.scrollTop += r.bottom - lim + 8; else if (r.top < 0) sd.scrollTop += r.top - 8; } } }   // ticking person #150 keeps the Week grid where it was
   plainLabels();
   tidyHelp();
   if (S.auth) { if (S.page === 'builder') bRestoreDraft(); bKeepDraft(); }
@@ -2737,11 +2739,6 @@ const REVIEW_FAQ = [
 function reviewFaq() {return `<section class="panel guide-article"><h2>Common questions</h2>${REVIEW_FAQ.map(([q,a])=>`<details class="faq"><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</section>`;}
 const HELP = {q:'', topic:null};
 const pageName = k => (PAGES.find(x => x[0] === k) || [k,k])[1];
-const NO_INTRO = ['live','overview','builder','schedule','shiftchk','schaudit','whatif','planvs','adherence','abs','ot','audit'];
-function pageIntro() {
-  const g = GUIDE.find(x => x[0] === S.page);
-  return g ? `<div class="page-guide"><span><b>${esc(pageName(S.page))}</b> · ${esc(g[2])}</span><button class="btn sm" data-a="pageHelp">Step-by-step help</button></div>` : '';
-}
 function guideArticle(g) {
   return `<article class="panel guide-article" id="guide-${g[0]}"><h2>${esc(g[1])}</h2><p class="sub">${esc(g[2])}</p><ol>${g[3].map(x => `<li>${esc(x)}</li>`).join('')}</ol><button class="btn" data-a="go" data-v="${g[0]}">Open ${esc(pageName(g[0]))} →</button></article>`;
 }
@@ -2755,7 +2752,7 @@ function pHelp() {
   const q = HELP.q.toLowerCase().trim();
   const list = GUIDE.filter(g => canSee(g[0]) && (!HELP.topic || HELP.topic === g[0]) && (!q || g.flat().join(' ').toLowerCase().includes(q) || pageName(g[0]).toLowerCase().includes(q)));
   return `<div class="head"><div><div class="kicker">How-to guide</div><h1>How to use <b>Workforce Tool</b></h1><p class="sub">Find a task, follow the steps, then open the page when you are ready.</p></div></div>
-  <section class="panel guide-search"><label for="helpQ">Search the guide</label><input class="in" id="helpQ" type="search" placeholder="Try schedules, supervisor, leave or clock-in" value="${esc(HELP.q)}"><button class="btn" data-a="helpAll">Show all topics</button></section>
+  <section class="panel guide-search"><label for="helpQ">Search the guide</label><input class="in" id="helpQ" type="search" placeholder="Try schedules, supervisor, leave or clock-in" value="${esc(HELP.q)}"><button class="btn" data-a="helpAll" ${HELP.topic || HELP.q ? '' : 'disabled title="All topics are already shown"'}>Show all topics</button></section>
   <p role="status">${list.length} topic${list.length === 1 ? '' : 's'}${HELP.topic ? ' · Help for ' + esc(pageName(HELP.topic)) : ''}</p>
   <div class="guide-list">${list.length ? list.map(guideArticle).join('') : '<section class="panel guide-article"><h2>No matching topics</h2><p>Try a shorter word, or select Show all topics.</p></section>'}</div>
   ${reviewFaq()}<details class="panel guide-article"><summary>Words used in the tool</summary><dl><dt>Station / team</dt><dd>The work group a person belongs to.</dd><dt>Staffing / coverage</dt><dd>How many people are available to work compared with how many are needed.</dd><dt>Draft</dt><dd>A schedule change that has not been sent to Teams Shifts.</dd><dt>Publish</dt><dd>Send schedule changes to Teams Shifts. A dry run previews the result only.</dd><dt>Repeating schedule / pattern</dt><dd>A saved set of shifts that can be applied to one or more weeks.</dd><dt>Scheduled hours worked</dt><dd>Logged work time inside a planned shift, divided by scheduled work time.</dd></dl></details>`;
@@ -2816,7 +2813,7 @@ function shell() {
         <span class="sp"></span><span id="syncPill">${syncPill()}</span>
         <button class="btn sm" data-a="pageHelp" aria-label="Help with this page"><span class="hl">Help with this page</span><span class="hs">Help</span></button><button class="btn sm ghost" data-a="theme" aria-label="Switch theme">◐</button>
         <span class="user" title="${esc(W.ME.name)} · ${esc(W.ME.role)}"><span class="av">${initials(W.ME.name)}</span><span class="un">${esc(W.ME.name.split(' ')[0] === W.ME.name ? W.ME.name : W.ME.name)}<small>${esc(W.ME.role)}</small></span></span><button class="btn sm ghost" data-a="logout" title="Sign out" aria-label="Sign out">Sign out</button></div>
-      <main id="main" tabindex="-1">${NO_INTRO.includes(S.page) ? '' : pageIntro()}${cacheNotice()}${loadingNote()}${loadingGate() || ({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
+      <main id="main" tabindex="-1">${cacheNotice()}${loadingNote()}${loadingGate() || ({ home:pHome, help:pHelp, overview:pOverview, live:pLive, requests:pRequests, schedule:pSchedule, allocation:pAllocation, builder:pBuilder, inactive:pInactive, connect:pConnect, swaps:pSwaps, schaudit:pSchAudit, whatif:pWhatIf, exempt:pExempt, adherence:pAdherence, abs:pAbs, ot:pOT, planvs:pPlanVs, shiftchk:pShiftsChk, roster:pRoster, sources:pSources, notify:pNotify, users:pUsers, audit:pAudit, settings:pSettings })[S.page]()}</main>
     </div></div>`;
 }
 
@@ -3404,8 +3401,8 @@ function pSettings() {
         <td class="num">${new Date().toLocaleTimeString('en-GB', { timeZone:z, hour:'2-digit', minute:'2-digit' })}</td>
         <td>${feed && feed !== z ? `<span class="pill warn" title="Crane's schedules arrive from the portal sync in ${esc(feed)}">Feed is ${esc(feed)}</span>` : ''}</td></tr>`; }).join('')}</tbody></table>
     <p class="foot-note">Agents in other sites see the same shift in their own local time in Teams; the tool and Shifts both plan in the team time zone. Changing a zone moves where existing tool times land in Shifts, so publish again after changing it.</p></section>
-  <section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Publishing to Microsoft Shifts</h2><p class="sub">Each schedule change and PTO decision creates a job. Failed jobs can be retried.</p></div>${W.SYNC.some(j => j.status === 'Draft') ? '<button class="btn pri sm" data-a="publish">Publish drafts</button>' : ''}</div>
-    <div class="tw"><table><thead><tr><th>Job</th><th>When</th><th>Agent</th><th>Action</th><th>Dates</th><th>Shifts team · endpoint</th><th>Status</th><th></th></tr></thead><tbody>
+  <section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Publishing to Microsoft Shifts</h2><p class="sub">${(() => { const n = {}; W.SYNC.forEach(j => n[j.status] = (n[j.status] || 0) + 1); const need = (n.Failed || 0) + (n.Draft || 0) + (n.Retrying || 0); return `${W.SYNC.length} job${W.SYNC.length === 1 ? '' : 's'} · ${Object.entries(n).map(([k, v]) => v + ' ' + k.toLowerCase()).join(' · ') || 'none yet'}${need ? ` · <b style="color:var(--warn)">${need} need attention</b>` : ''}`; })()}. Each schedule change and leave decision creates a job; failed jobs can be retried.</p></div>${W.SYNC.some(j => j.status === 'Draft') ? '<button class="btn pri sm" data-a="publish">Publish drafts</button>' : ''}</div>
+    <div class="tw tall"><table><thead><tr><th>Job</th><th>When</th><th>Agent</th><th>Action</th><th>Dates</th><th>Shifts team · endpoint</th><th>Status</th><th></th></tr></thead><tbody>
     ${W.SYNC.slice(0, 40).map(j => `<tr><td class="num">${j.id}</td><td class="num">${esc(j.at.slice(5))}</td><td>${esc(W.AGI[j.agent].name)}</td><td>${esc(j.action)}${j.notes ? `<div class="meta" title="Note sent to Shifts">Note: ${esc(j.notes)}</div>` : ''}</td><td class="meta">${j.dates.length > 3 ? fmtS(j.dates[0]) + ' + ' + (j.dates.length - 1) : j.dates.map(fmtS).join(', ')}</td><td class="meta"><div style="color:var(--ink2)">${esc(j.team || '—')}</div><span style="font-family:ui-monospace,monospace">${esc(j.endpoint)}</span></td>
       <td><span class="pill ${({Confirmed:'ok', Failed:'bad', Draft:'warn', Retrying:'warn', 'Preview only':'info'})[j.status] || 'info'}"><i></i>${esc(j.status)}</span>${['Failed','Retrying','Confirmed','Preview only','Not sent'].includes(j.status) && j.msg ? `<div class="meta">${esc(j.msg)}</div>` : ''}</td><td>${j.status === 'Failed' || (j.status === 'Not sent' && /^schedule\/timesOff/.test(j.endpoint)) ? `<button class="btn sm" data-a="retry" data-v="${j.id}">${j.status === 'Failed' ? 'Retry' : 'Send'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">No jobs yet.</div></td></tr>'}</tbody></table></div></section>
   <div style="margin-top:14px">${swapRulesPanel()}</div>`;
@@ -3785,8 +3782,7 @@ function pExempt() {
   W.AG.forEach(a => range(from, TODAY).forEach(d => { const s = W.sched(a, d); if (s.working && s.absence) use[s.absence.reason] = (use[s.absence.reason] || 0) + 1; }));
   const pl = W.REASONS.filter(r => r.type === 'planned').length;
   return `<div class="head"><div class="grow"><div class="kicker">Absence reasons · how each one is counted</div><h1>Approved <b>exemptions</b></h1><p class="sub">Configured reasons for this tool; Teams Shifts reasons are managed separately · ${W.REASONS.length} reasons · ${pl} planned · ${W.REASONS.length - pl} unplanned</p></div>${ed ? '<button class="btn pri" data-a="reasonNew">Add absence reason</button>' : ''}</div>
-  <div class="alarm" style="border-color:color-mix(in srgb,var(--bad) 45%,transparent)"><h2 style="color:var(--bad)">Rule</h2><p style="margin:6px 0 0"><b>Team leads may only apply the exemptions enabled in Team Shift.</b> Administrators can add a reason here and choose how it is counted. Adding a reason here does not create it in Teams Shifts. Use the same reason in Teams when recording time off there.</p></div>
-  <div class="ex-grid">${W.REASONS.map(r => `<button class="ex ${r.type}" ${ed ? `data-a="exType" data-v="${esc(r.k)}" title="Click to switch planned / unplanned"` : 'disabled'}><b>${esc(r.k)}</b><span>${r.type === 'planned' ? 'Planned' : 'Unplanned'}${r.partial ? ' · part of day' : ''}${r.rest ? ' · rest day' : ''}</span></button>`).join('')}</div>
+  <div class="note" style="margin-bottom:14px"><b>Team leads may only apply the exemptions enabled in Team Shift.</b> Administrators can add a reason here and choose how it is counted. Adding a reason here does not create it in Teams Shifts. Use the same reason in Teams when recording time off there.</div>
   <section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>How each reason is counted</h2><p class="sub">These settings decide ABS %, PTO slots and coverage. Every change is audited.</p></div></div>
     <div class="tw"><table><thead><tr><th>Reason</th><th>Code</th><th>Type</th><th>Counts in ABS %</th><th>Uses a PTO slot</th><th>Part of day</th><th>Rest day</th><th class="n">Used · 8 wk</th></tr></thead><tbody>
     ${W.REASONS.map(r => `<tr><td class="nm">${esc(r.k)}</td><td>${abTag(r.k)}</td>
@@ -3868,7 +3864,7 @@ function pRoster() {
         <td class="n" style="color:${s.noLead ? 'var(--bad)' : 'inherit'}">${s.noLead || ''}</td><td class="n" style="color:${s.noEmail ? 'var(--bad)' : 'inherit'}">${s.noEmail || ''}</td><td class="n">${s.notInShifts || ''}</td></tr>`; }).join('') || '<tr><td colspan="8"><div class="empty">No stations in this filter.</div></td></tr>'}</tbody></table></div></section>`;
   return head + strip + filters + `<section class="panel"><div class="panel-h"><div class="grow"><h2>People</h2><p class="sub">${rows.length.toLocaleString()} ${rows.length === 1 ? 'person' : 'people'} · click a name for adherence, absences and requests</p></div>
       <button class="btn sm" data-a="rsWk" data-v="-7">←</button><span class="num" style="min-width:120px;text-align:center">${fmtS(days[0])} – ${fmtS(days[6])}</span><button class="btn sm" data-a="rsWk" data-v="7">→</button><button class="btn sm ghost" data-a="rsWk" data-v="0">This week</button></div>
-    <div class="tw"><table class="rst"><thead><tr><th>Agent</th><th>Station · site</th><th>Team lead</th>${hasSup ? '<th>Supervisor</th>' : ''}${hasPos ? '<th>Position</th>' : ''}${days.map(d => `<th class="rwk ${d === TODAY ? 'today' : ''}">${W.DOW[dow(d)]}<span>${W.parse(d).getDate()}</span></th>`).join('')}<th>Flags</th></tr></thead><tbody>
+    <div class="tw tall"><table class="rst"><thead><tr><th>Agent</th><th>Station · site</th><th>Team lead</th>${hasSup ? '<th>Supervisor</th>' : ''}${hasPos ? '<th>Position</th>' : ''}${days.map(d => `<th class="rwk ${d === TODAY ? 'today' : ''}">${W.DOW[dow(d)]}<span>${W.parse(d).getDate()}</span></th>`).join('')}<th>Flags</th></tr></thead><tbody>
     ${page.map(x => { const a = x.a; return `<tr class="clickrow ${a.inactive ? 'dim' : ''}" data-a="rsPerson" data-v="${a.id}"><td><div class="nm">${esc(a.name)}</div><div class="meta">${esc(a.email || 'no work email')}</div></td>
       <td class="nowrap">${esc(W.LOB[a.key] ? (W.LOB[a.key].station || W.LOB[a.key].lob) : a.lob)} <span class="meta">· ${esc(S.acc === 'all' ? W.ACC[a.acc].name + ' · ' : '')}${esc(W.locOf(a))}</span></td>
       <td class="ell" title="${esc(x.lead || '')}">${esc(x.lead || '—')}</td>${hasSup ? `<td class="ell" title="${esc(x.sup || '')}">${esc(x.sup || '—')}</td>` : ''}${hasPos ? `<td class="meta ell" title="${esc(a.position || '')}">${esc(a.position || '—')}</td>` : ''}${days.map(d => wkCell(a, d)).join('')}<td>${flagPills(x.flags) || '<span class="pill ok">✓</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${days.length + 6}"><div class="empty">Nobody matches these filters.</div></td></tr>`}</tbody></table></div>
@@ -5587,7 +5583,7 @@ const A = {
   inAsk: el => { const a = W.AGI[el.dataset.v]; a.tlAsked = true; W.audit('Roster', 'Removal requested by team lead', a.name, '', 'Asked WFM to remove future shifts', a.inactiveWhy || ''); toast('WFM notified in Teams · they will remove the shifts'); render(); },
   inClear: el => { const n = W.clearInactiveShifts(el.dataset.v); toast(`${n} future shift${n === 1 ? '' : 's'} removed · deletion sent to Shifts`); render(); },
   inReact: el => { W.setInactive(el.dataset.v, false); toast('Reactivated · counted again in schedule and reports'); render(); },
-  inMark: () => { const id = $('inWho').value; if (!id) return; W.setInactive(id, true, $('inWhy').value); toast(`${W.AGI[id].name} marked inactive · removed from ABS and schedule`); render(); },
+  inMark: () => { const id = $('inWho').value; if (!id) { toast('Pick the person first'); $('inWho').focus(); return; } W.setInactive(id, true, $('inWhy').value); toast(`${W.AGI[id].name} marked inactive · removed from ABS and schedule`); render(); },
   accRemove: el => { const a = W.ACC[el.dataset.v], n = W.AG.filter(x => x.acc === a.id).length;
     open(`Remove ${esc(a.name)}?`, `<p>${n} people, ${W.LOBS.filter(l => l.acc === a.id).length} stations, their schedules, requests, swaps and history leave every page and report.</p>
       <div class="note" style="margin-bottom:10px">It's archived, not deleted. You can restore it from <b>Roster &amp; Teams → Accounts</b>. Nothing changes in Shifts or Teams.</div>
@@ -5756,7 +5752,6 @@ const A = {
   expAu: () => { const ws=addD(weekStart(TODAY),7*S.auWk),rows=auditExportRows(ws);W.ui.csv('schedule-audit-'+ws+'.csv',[['Week','Agent','ID','Account','Site','Station','Team lead','Pattern','Shifts','Issues'],...rows.map(x=>[ws,x.a.name,x.a.id,W.ACC[x.a.acc].name,W.locOf(x.a),x.a.station||(W.LOB[x.a.key]||{}).station||x.a.lob,x.a.tl,W.PATTERNS[x.pattern].name,x.work,x.issues.filter(i=>S.auF==='all'||i.k===S.auF).map(i=>i.t).join('; ')])]);toast(rows.length+' filtered rows downloaded'); },
   wiPreset: el => { S.wi = JSON.parse(JSON.stringify(WI_PRESETS[+el.dataset.v][1])); render(); },
   wiReset: () => { const n = Object.keys(S.wi || {}).length; S.wi = {}; toast(n ? 'Staffing changes reset to today\'s saved schedule' : 'Nothing to reset: no changes tried yet'); render(); },
-  exType: el => { const r = W.RCFG[el.dataset.v]; W.setReason(r.k, { type:r.type === 'planned' ? 'unplanned' : 'planned' }); OPS.reasons=W.REASONS.map(x=>({...x})); saveOps(); toast(`${r.k} is now ${r.type}`); render(); },
   exSet: el => { W.setReason(el.dataset.k, { [el.dataset.f2]:el.dataset.v }); OPS.reasons=W.REASONS.map(x=>({...x})); saveOps(); render(); },
   mapLegacy: el => { const x = W.LEGACY_REASONS[+el.dataset.v], to = $('lgM' + el.dataset.v).value; x.mapped = to; W.audit('Absence reasons', 'Legacy reason mapped', x.k, `${x.records} records`, to, x.source); toast(`${x.k} → ${to}`); render(); },
   addTeamAcc: el => { setTimeout(saveTeams, 0); const t = W.SHIFTS_TEAMS[+el.dataset.v], per = Math.floor(t.members / t.groups.length); const acc = W.addAccount({ name:t.team.replace(/^WFM - /, '').replace(/ - BPO$/, ''), team:t.team, site:t.site, lobs:t.groups.map(g => ({ id:g, hc:per, minInt:2 })), members:true });
