@@ -3036,16 +3036,19 @@ function pSchedule() {
       <tr class="sub"><td>Available / required</td><td></td>${covs.map(c => `<td style="color:${c.req && c.avail < c.req ? 'var(--bad)' : 'inherit'}"><b>${c.avail}</b>/${c.req || '–'}</td>`).join('')}</tr></tbody></table></div>
     <div class="legend"><span><span class="sc sc-D" style="opacity:.55;outline:1.5px dashed var(--ink3)">8–16:30</span> projected (auto-roll)</span><span>${abTag('Vacation')} planned</span><span>${abTag('Medical leave')} unplanned</span><span>Codes follow the Team Shift exemptions</span></div></section>`;
 }
+/* the tool reads Shifts only through the server feed: show when the server last read each account, and anything older than 30 min */
+const feedAge = t => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000)); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : durL(m) + ' ago'; };
 function scheduleReadStatus() {
- const accs=W.ACCOUNTS.filter(a=>inScope(a.id)&&(S.acc==='all'||a.id===S.acc)), canRead=DB.on&&CONN.readUrl;
- const st=accs.map(a=>({a,i:(DB.chk||{})[a.id]||{},pend:((W.SCHK[a.id]||{}).rows||[]).filter(r=>r.side!=='shifts').length}));
- const fail=st.filter(x=>x.i.err),done=st.filter(x=>!x.i.err&&x.i.at),wait=st.filter(x=>!x.i.err&&!x.i.at),rev=x=>x.pend?` · <b>${x.pend} to review</b>`:'';
- const mode=DB.on?(CONN.readUrl?'Teams is checked every minute while this page is open':'Teams reader not connected'):'Sample data';
+ const accs=W.ACCOUNTS.filter(a=>inScope(a.id)&&(S.acc==='all'||a.id===S.acc));
+ const st=accs.map(a=>({a,t:(DB.teams||{})[a.id]||{},pend:((W.SCHK[a.id]||{}).rows||[]).filter(r=>r.side!=='shifts').length}));
+ const rev=x=>x.pend?` · <b>${x.pend} to review</b>`:'',old=x=>x.t.feedAt&&Date.now()-Date.parse(x.t.feedAt)>30*60000;
+ const ok=st.filter(x=>x.t.feedAt&&x.t.feedOk&&!old(x)),late=st.filter(x=>x.t.feedAt&&(!x.t.feedOk||old(x))),none=st.filter(x=>!x.t.feedAt);
+ const mode=DB.on?'Teams Shifts is read by the server every 15 min':'Sample data';
  return `<section class="srcbar" title="The saved original schedule is kept separately. Unsent tool changes are never overwritten by a Teams read."><span><b>Current schedule</b> · ${mode}</span>`
-  +(done.length?`<span>Checked: ${done.map(x=>`${esc(x.a.name)} ${esc(x.i.at)}${rev(x)}`).join(', ')}</span>`:'')
-  +(wait.length?`<span>Not checked yet: ${wait.length===accs.length&&accs.length>1?'all '+accs.length+' accounts':wait.map(x=>esc(x.a.name)+rev(x)).join(', ')}</span>`:'')
-  +fail.map(x=>`<span><span class="pill bad">Read failed</span> ${esc(x.a.name)}: ${esc(x.i.err)}${rev(x)}</span>`).join('')
-  +`<span class="sp"></span>${canRead?'':`<span class="meta">${DB.on?'Refresh needs the Shifts reader link (Connected services)':'Refresh works with live data only'}</span>`}<button class="btn sm" data-a="scheduleRefresh" ${canRead?'':'disabled'}>Refresh from Teams</button></section>`;
+  +(DB.on&&ok.length?`<span>Read: ${ok.map(x=>`${esc(x.a.name)} ${feedAge(x.t.feedAt)}${rev(x)}`).join(', ')}</span>`:'')
+  +late.map(x=>`<span><span class="pill warn">${x.t.feedOk?'Older than 30 min':'Last read failed'}</span> ${esc(x.a.name)}: showing the read from ${feedAge(x.t.feedAt)}${x.t.feedErr?' · '+esc(x.t.feedErr):''}${rev(x)}</span>`).join('')
+  +(DB.on&&none.length?`<span>Not read yet: ${none.map(x=>esc(x.a.name)).join(', ')}</span>`:'')
+  +`<span class="sp"></span>${DB.on?'':'<span class="meta">Refresh works with live data only</span>'}<button class="btn sm" data-a="scheduleRefresh" ${DB.on&&!scheduleReadBusy?'':'disabled'}>${scheduleReadBusy?'Reading Teams…':'Refresh from Teams'}</button></section>`;
 }
 
 function scheduleDetail(id,d) {
@@ -3054,14 +3057,16 @@ function scheduleDetail(id,d) {
 }
 let scheduleReadBusy=false;
 async function refreshScheduleReads() {
- if(scheduleReadBusy||!DB.on||!S.auth||!CONN.readUrl)return;
- if(Object.values(DB.teams||{}).some(x=>x.st==='loading'||x.hist==='loading'))return;   // the first load already reads these weeks; checking now only queues behind it
- scheduleReadBusy=true;
- try { for(const acc of W.LIVE.accs.filter(inScope)) await dbShiftsCheck(acc,null,true,true); }
- finally { scheduleReadBusy=false; }
+ if(scheduleReadBusy||!DB.on||!S.auth)return;
+ scheduleReadBusy=true;render();
+ try{const accs=W.LIVE.accs.filter(inScope),res=await Promise.all(accs.map(a=>dbFeedNow(a).then(r=>[a,r])));
+  const started=res.filter(x=>x[1]==='started').map(x=>W.ACC[x[0]].name),busy=res.filter(x=>x[1]==='busy').map(x=>W.ACC[x[0]].name),bad=res.filter(x=>!['started','busy'].includes(x[1]));
+  toast(started.length?`Reading Teams Shifts on the server for ${started.join(', ')} · updates here in about a minute`:busy.length?`${busy.join(', ')} ${busy.length===1?'was':'were'} read in the last 2 minutes · the newest read shows here automatically`:'Refresh not available: '+(bad[0]?bad[0][1]:'no accounts'));
+  for(const wait of [25,20,20,30,30]){await new Promise(r=>setTimeout(r,wait*1000));await feedPoll();}
+ }finally{scheduleReadBusy=false;render();}
 }
 /* 'live' (Who is working now + call-outs) too: time off entered in Shifts during the day shows there without a reload (2026-11-05) */
-setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests','swaps','live'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))(['requests','swaps'].includes(S.page) ? refreshTeamRequests() : refreshScheduleReads());},60000);
+setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests','swaps','live'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))feedPoll();},60000);
 
 /* OT tag beside a shift: hours of overtime that day (OT shifts from Teams, or an OT / Overtime activity) */
 const otText = m => m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ' ' + m % 60 + 'm' : ''}` : `${m}m`;
@@ -4575,7 +4580,6 @@ async function unpackTeamCache(P){if(!P||typeof P.gz!=='string')return P;const b
 /* Team snapshots (wft_team_cache): shown at sign-in, and within 24 h only the last 2 weeks + next 5 are read again (no history fill).
    Switched off for a few minutes on 2026-10-30 after slow test loads that turned out to be Chrome slowing a background tab. */
 const TEAM_CACHE_ON = true;
-const FEED_ON = true, FEED_MAX_AGE = 45 * 60000;   // Supabase Shifts feed: used for the first view when read in the last 45 min
 async function dbSaveTeamCache(acc,J){if(!TEAM_CACHE_ON||!DB.on||!['Admin','RTA'].includes(W.ME.role)||!J.complete||J.partial)return;const {error}=await DB.sb.from('wft_team_cache').upsert({account_id:acc,payload:await packTeamCache(J),version:1,captured_at:new Date().toISOString(),captured_by:DB.profile?.id});if(error)DB.cacheError=error.message;else DB.cacheSavedAt=new Date().toISOString();}
 /* keyset paging for tables ordered by id: each page starts after the last id instead of skipping OFFSET rows. Crane's 60-day change
    history (58,521 rows) took 80 s with offsets (later pages ~2 s each) and 16 s this way, live 2026-11-13. Same rows, same order. */
@@ -4608,41 +4612,52 @@ async function dbRestoreTeam(acc,J,P){
  DB.requestReasons=DB.requestReasons||{};DB.requestReasons[acc]=J.reasons||[];if(Array.isArray(J.requests))W.loadTeamRequests(acc,J);
  return changes;
 }
-/* weeks 3–12 of history after the first fast read: merged, applied when nobody has unsaved schedule edits, then cached and snapshotted */
-async function dbFillHistory(acc,J,P){
- try{const H=await dbReadTeam(acc,null,{history:true}),seen=new Set(),keep=k=>!seen.has(k)&&seen.add(k);
-  const J2={...J,partial:false,from:H.shifts.length||H.timeOff.length?new Date(Date.parse(J.from)-70*864e5).toISOString().replace(/\.\d+Z$/,'Z'):J.from,fullAt:new Date().toISOString(),
-   shifts:[...J.shifts,...H.shifts].filter(x=>keep('s'+(x.id||x.userId+x.start+x.end))),timeOff:[...J.timeOff,...H.timeOff].filter(x=>keep('t'+x.userId+x.start+x.end+x.reasonId))};
-  while(Object.keys(B.draft).length||Object.keys(B.brk).length||scheduleReadBusy)await new Promise(r=>setTimeout(r,15000));
-  await dbRestoreTeam(acc,J2,P);await dbSaveTeamCache(acc,J2);DB.teams[acc]={...DB.teams[acc],hist:'ok'};setTimeout(()=>dbSnapshotFacts([acc]),3000);
- }catch(e){DB.teams[acc]={...DB.teams[acc],hist:'failed',histWhy:e.message};}
- render();
-}
 const histNotice=()=>{const cw=Object.entries(DB.clockWarn||{}).filter(([a])=>S.acc==='all'||S.acc===a).map(([a,w])=>`<p class="note warn"><b>${esc(W.ACC[a].name)}:</b> some clock-ins could not be loaded (${esc(w)}). Those days show no login data, not no-shows.</p>`).join('');const hw=cw+Object.entries(DB.histWarn||{}).filter(([a])=>S.acc==='all'||S.acc===a).map(([a,w])=>`<p class="note warn"><b>${esc(W.ACC[a].name)}:</b> schedule change history could not be loaded (${esc(w)}). Schedules and reports are shown; the saved original schedule and the Schedule changes history are hidden until the database clean-up.</p>`).join('');const l=Object.entries(DB.teams||{}).filter(([a,x])=>x.hist&&x.hist!=='ok'&&(S.acc==='all'||S.acc===a));return hw+(l.length?`<p class="note">${l.map(([a,x])=>esc(W.ACC[a].name)+(x.hist==='failed'?' older weeks failed to load ('+esc(x.histWhy||'')+')':' older weeks still loading from Teams')).join(' · ')}. The last 2 weeks and the next 5 are complete; weeks before that fill in automatically.</p>`:'');};
+/* 2026-11-16: Supabase is the tool's only Shifts reader. The server (shifts-feed) reads each account every 15 min, 7 days back → 36 ahead,
+   plus requests and swaps; the tool loads its saved 12-week snapshot + that feed and never calls the reader to load or check schedules.
+   Each feed is merged into the snapshot and saved again, so history builds up. Refresh from Teams asks the server to read now. */
+const FEED_SEEN = {}; DB.lastJ = DB.lastJ || {};
+async function feedRow(acc, withPayload) {
+ const r = await DB.sb.from('wft_shifts_feed').select(withPayload ? 'payload,read_at,ok,error,tried_at' : 'read_at,ok,error,tried_at').eq('account_id', acc).maybeSingle();
+ if (r.error) throw Error(r.error.message); return r.data;
+}
+/* snapshot ∪ feed, trimmed to 12 weeks; freshFrom = the feed's first read instant, so the two-way check only adopts days this read covered */
+function feedJ(base, F) {
+ const J = F ? W.feedMerge(base, F) : { ...base }, cut = Date.now() - 84 * 864e5, keep = x => Date.parse(x.end || x.start) >= cut;
+ return { ...J, shifts:(J.shifts || []).filter(keep), timeOff:(J.timeOff || []).filter(keep), from:J.from && Date.parse(J.from) > cut ? J.from : new Date(cut).toISOString().replace(/\.\d+Z$/, 'Z'),
+   complete:Array.isArray(J.requests), partial:false, freshFrom:F ? F.from : null, fullAt:new Date().toISOString() };
+}
+async function dbFeedNow(acc) { const r = await DB.sb.rpc('wft_feed_now', { acc }); return r.error ? 'error: ' + r.error.message : r.data; }
 async function dbLoadTeams(p) {
- if(!CONN.readUrl)return;const P=CONN.pilot||{},accs=readAccs().filter(x=>p.scope.includes('all')||p.scope.includes(x));if(!accs.length)return;
+ const P=CONN.pilot||{},accs=readAccs().filter(x=>p.scope.includes('all')||p.scope.includes(x));if(!accs.length)return;
  DB.teams=DB.teams||{};accs.forEach(acc=>DB.teams[acc]={st:'loading',at:Date.now(),loaded:false});render();
  await Promise.all(accs.map(async acc=>{const started=Date.now();
-  let snap=null;
-  /* fast start: the Supabase Shifts feed (server reads Shifts every 30 min) refreshes the saved snapshot's next 3 weeks before the first
-     render; the live read below still runs and replaces everything, unchanged. A failed or stale feed is simply skipped. */
-  const feedP=FEED_ON?DB.sb.from('wft_shifts_feed').select('payload,read_at,ok').eq('account_id',acc).maybeSingle().then(r=>!r.error&&r.data&&r.data.ok&&Array.isArray(r.data.payload?.shifts)&&Date.now()-Date.parse(r.data.read_at)<FEED_MAX_AGE?r.data:null,()=>null):Promise.resolve(null);
-  const showFeed=(J,feed,at)=>{if(feed&&Array.isArray(J.swaps)){DB.swaps=DB.swaps||{};DB.swaps[acc]={...W.loadTeamSwaps(acc,J),err:'',at:new Date().toLocaleTimeString()};}DB.teams[acc]={st:'loading',loaded:true,cachedAt:at,feedAt:feed?feed.read_at:null,at:started};render();};
-  if(TEAM_CACHE_ON)try{const cached=await DB.sb.from('wft_team_cache').select('payload,captured_at,version').eq('account_id',acc).maybeSingle();
-   if(!cached.error&&cached.data)cached.data.payload=await unpackTeamCache(cached.data.payload);
-   if(cached.error){DB.cacheError=cached.error.message;}else if(cached.data?.version===1&&Array.isArray(cached.data.payload?.shifts)){
-    snap=cached.data;const feed=await feedP,J=feed?W.feedMerge(cached.data.payload,feed.payload):cached.data.payload;
-    await dbRestoreTeam(acc,J,P);showFeed(J,feed,feed&&Date.parse(feed.read_at)>Date.parse(cached.data.captured_at)?feed.read_at:cached.data.captured_at);
-   }
-  }catch(e){DB.cacheError=e.message;}
-  if(!snap)try{const feed=await feedP;if(feed){const J=W.feedMerge(null,feed.payload);await dbRestoreTeam(acc,J,P);showFeed(J,feed,feed.read_at);}}catch(e){console.warn('shifts feed',e.message);}
-  try{const J=await dbReadTeam(acc,snap,{recent:true}),changes=await dbRestoreTeam(acc,J,P),L=W.LIVE.teams[acc]||{};
-   DB.teams[acc]={st:'ok',loaded:true,people:L.people,shifts:L.shifts,stations:(L.stations||[]).length,secs:Math.round((Date.now()-started)/1000),hist:J.partial?'loading':'ok'};
-   if(['Admin','RTA','Team lead'].includes(p.role)){await dbSyncPeople();if(DB.peopleOk&&!changes.failed)await dbSaveReaderOriginals(acc,changes.data||[]);}
-   await dbShiftsCheck(acc,J,true);if(J.partial)dbFillHistory(acc,J,P);else setTimeout(()=>dbSnapshotFacts([acc]),3000);
-  }catch(e){DB.teams[acc]={...DB.teams[acc],st:'failed',why:e.message};DB.liveErr=W.ACC[acc].name+' reader: '+e.message;}
+  try{
+   const [cached,feed]=await Promise.all([TEAM_CACHE_ON?DB.sb.from('wft_team_cache').select('payload,captured_at,version').eq('account_id',acc).maybeSingle():Promise.resolve({data:null}),feedRow(acc,true).catch(e=>{console.warn('shifts feed',e.message);return null;})]);
+   if(cached.error)DB.cacheError=cached.error.message;else if(cached.data)cached.data.payload=await unpackTeamCache(cached.data.payload);
+   const base=cached.data&&cached.data.version===1&&Array.isArray(cached.data.payload?.shifts)?cached.data.payload:null,F=feed&&feed.payload&&Array.isArray(feed.payload.shifts)?feed.payload:null;
+   if(!base&&!F){DB.teams[acc]={st:'failed',why:'No Shifts data in Supabase yet. The server reads each account every 15 minutes; a read was requested.'};dbFeedNow(acc);return;}
+   const J=feedJ(base,F),changes=await dbRestoreTeam(acc,J,P),L=W.LIVE.teams[acc]||{};
+   DB.lastJ[acc]=J;FEED_SEEN[acc]=feed&&feed.read_at;
+   DB.teams[acc]={st:'ok',loaded:true,people:L.people,shifts:L.shifts,stations:(L.stations||[]).length,secs:Math.round((Date.now()-started)/1000),hist:'ok',
+    feedAt:feed&&feed.read_at,feedOk:!!(feed&&feed.ok),feedErr:feed&&!feed.ok?feed.error||'':'',cachedAt:cached.data?cached.data.captured_at:null};
+   if(['Admin','RTA','Team lead'].includes(p.role)){await dbSyncPeople();if(F&&DB.peopleOk&&!changes.failed)await dbSaveReaderOriginals(acc,changes.data||[]);}
+   await dbShiftsCheck(acc,J,true);setTimeout(()=>dbSnapshotFacts([acc]),3000);
+  }catch(e){DB.teams[acc]={...DB.teams[acc],st:'failed',why:e.message};DB.liveErr=W.ACC[acc].name+': '+e.message;}
   render();
  }));
+}
+/* every 60 s on schedule, floor and inbox pages: one tiny read of each feed's time; a newer server read is merged and checked */
+let feedPolling=false;
+async function feedPoll() {
+ if(feedPolling||!DB.on||!S.auth)return;feedPolling=true;
+ try{for(const acc of W.LIVE.accs.filter(inScope)){
+   const f=await feedRow(acc,false).catch(()=>null);if(!f)continue;
+   DB.teams[acc]={...(DB.teams[acc]||{}),feedAt:f.read_at,feedOk:f.ok,feedErr:f.ok?'':f.error||''};
+   if(!f.read_at||f.read_at===FEED_SEEN[acc]||!DB.lastJ[acc])continue;
+   const g=await feedRow(acc,true).catch(()=>null);if(!g||!g.payload||!Array.isArray(g.payload.shifts))continue;
+   const J=feedJ(DB.lastJ[acc],g.payload);DB.lastJ[acc]=J;FEED_SEEN[acc]=g.read_at;await dbShiftsCheck(acc,J,true);
+ }}finally{feedPolling=false;render();}
 }
 async function dbSaveReaderOriginals(acc,changes) {
  const saved=new Set(changes.filter(x=>x.kind==='Original schedule captured').map(x=>W.kOf(x.person_id,x.d))), rows=[];
@@ -4676,65 +4691,10 @@ async function readerRun(body) {
   catch(e){if(e.name==='AbortError')throw Error('Shifts reader exceeded 90 seconds');throw e;}
   finally{clearTimeout(timer);}
 }
-/* cached = a complete snapshot from wft_team_cache. When it is under 24 h old and covers the 12-week history, only the last 2 weeks
-   and the next 5 are read again (7 calls instead of 17); older history comes from the snapshot. A full read still runs once a day. */
-/* opt.recent: no fresh snapshot → read only the last 2 weeks + next 5 so the tool is usable fast; dbFillHistory reads the rest after.
-   opt.history: only weeks 3–12 back (no requests), merged into a recent read by dbFillHistory. */
-async function dbReadTeam(accId, cached, opt = {}) {
-  const iso = d => d.toISOString().replace(/\.\d+Z$/, 'Z'), DAY = 864e5, t0 = new Date(), base = Date.UTC(t0.getUTCFullYear(), t0.getUTCMonth(), t0.getUTCDate());
-  const fullFrom = base - 84 * DAY, cp = cached && cached.payload, reuse = !!(cp && cp.complete && Array.isArray(cp.shifts) && Array.isArray(cp.timeOff) && Date.now() - Date.parse(cp.fullAt || cached.captured_at) < DAY && Date.parse(cp.from) <= fullFrom + 7 * DAY);
-  /* opt.check = the 60 s Teams check: only yesterday..+36 days (the days it compares), not 17 weeks. Every window ends a day past the
-     compared range so shifts that start late in the last day (account zone vs UTC) are not missed. */
-  const partial = (!!opt.recent && !reuse) || !!opt.check, from = opt.history ? fullFrom : opt.check ? base - DAY : reuse || partial ? base - 14 * DAY : fullFrom, to = opt.history ? base - 13 * DAY : base + 36 * DAY, wins = [];
-  for (let s = from; s < to; s += 7 * DAY) wins.push([s, Math.min(s + 8 * DAY, to)]);
-  /* names: the reader looks up people who are in Shifts but not team members (reader v6, ~5 s a call); only the first window's members are used */
-  const bg = !!opt.history || !!opt.bg;   // background reads wait behind first loads and manual checks
-  /* 3 tries (5 s, then 30 s apart): a Crane week now and then runs past 90 s and one slow week used to fail the whole account (2026-10-30) */
-  const readWeek = async ([s, e], names, tries = 3) => {
-    try { return await readerCall({action:'readteam',teamId:W.ACC[accId].teamId,winFrom:iso(new Date(s)),winTo:iso(new Date(e)),names},bg); }
-    catch (err) { if (tries > 1) {await new Promise(resolve=>setTimeout(resolve,tries === 3 ? 5000 : 30000));return readWeek([s,e],names,tries-1);} throw new Error(`${err.message} (week of ${iso(new Date(s)).slice(0, 10)}, 3 tries)`); }
-  };
-  const parts = [];
-  for (let i = 0; i < wins.length; i += 4) parts.push(...await Promise.all(wins.slice(i, i + 4).map((w, j) => readWeek(w, !opt.history && i + j === 0))));   // Queued globally: one connector call at a time across accounts
-  parts.forEach((p, i) => { if ((p.shifts || []).length >= 5000 || (p.timeOff || []).length >= 5000) (()=>{throw Error(`${accId} reader: week ${i+1} reached the 5,000-item limit; refusing an incomplete snapshot`);})(); });
-  const seen = new Set(), keep = k => !seen.has(k) && seen.add(k);
-  if (opt.history) return { shifts:parts.flatMap(p => p.shifts || []), timeOff:parts.flatMap(p => p.timeOff || []) };
-  let requestData = {}, requestError = '';
-  try { requestData = await dbReadRequests(accId, bg); } catch(e) { requestError = e.message; }
-  let swapData = {}, swapError = '';
-  try { swapData = await dbReadSwaps(accId, bg); } catch(e) { swapError = e.message; }
-  const old = list => reuse ? (list || []).filter(x => { const t = Date.parse(x.start); return t >= fullFrom && t < from; }) : [];   // history the fresh read did not cover
-  return { ...parts[0], complete:!requestError && Array.isArray(requestData.requests), ...(Array.isArray(requestData.requests) ? {requests:requestData.requests} : {}), requestError, ...(Array.isArray(swapData.swaps) ? {swaps:swapData.swaps, offers:swapData.offers || []} : {}), swapError, partial, from:iso(new Date(partial ? from : fullFrom)), to:iso(new Date(to)), freshFrom:iso(new Date(from)), reusedHistory:reuse, fullAt:reuse ? (cp.fullAt || cached.captured_at) : new Date().toISOString(),
-    shifts:[...parts.flatMap(p => p.shifts || []), ...old(cp && cp.shifts)].filter(x => keep('s' + (x.id || x.userId + x.start + x.end))),
-    timeOff:[...parts.flatMap(p => p.timeOff || []), ...old(cp && cp.timeOff)].filter(x => keep('t' + x.userId + x.start + x.end + x.reasonId)) };
-}
-async function dbReadRequests(accId, bg = false) {
-  const data = await readerCall({action:'readrequests',teamId:W.ACC[accId].teamId}, bg);   // same queue and 90 s limit as the shift reads
-  if (!data || typeof data !== 'object') throw new Error('Request reader returned no data');
-  if (!Array.isArray(data.requests)) throw new Error('The reader needs the v4 Teams requests update');
-  if (data.requests.length >= 5000) throw new Error('Teams requests reached the 5,000-item read limit; check the flow pagination');
-  return data;
-}
-/* swap and offer requests from Teams (reader v7); same queue and 90 s limit as the other reads */
-async function dbReadSwaps(accId, bg = false) {
-  const data = await readerCall({action:'readswaps',teamId:W.ACC[accId].teamId}, bg);
-  if (!data || !Array.isArray(data.swaps)) throw new Error('The reader needs the v7 swap update');
-  if (data.swaps.length >= 5000 || (data.offers || []).length >= 5000) throw new Error('Teams swap requests reached the 5,000-item read limit');
-  return data;
-}
-async function refreshTeamRequests() {
-  if(scheduleReadBusy || !DB.on || !CONN.readUrl) return;
-  scheduleReadBusy=true; render(); DB.requests=DB.requests||{};
-  try { for (const acc of W.LIVE.accs.filter(inScope)) {
-    try {const data=await dbReadRequests(acc);const result=W.loadTeamRequests(acc,{...data,reasons:(DB.requestReasons || {})[acc] || []});DB.requests[acc]={...result,err:'',at:new Date().toLocaleTimeString()};}
-    catch(e){DB.requests[acc]={...(DB.requests[acc]||{}),err:e.message,at:new Date().toLocaleTimeString()};}
-    try {const data=await dbReadSwaps(acc);DB.swaps=DB.swaps||{};DB.swaps[acc]={...W.loadTeamSwaps(acc,{...data,shifts:(DB.lastShifts||{})[acc]||[]}),err:'',at:new Date().toLocaleTimeString()};}
-    catch(e){DB.swaps=DB.swaps||{};DB.swaps[acc]={...(DB.swaps[acc]||{}),err:e.message,at:new Date().toLocaleTimeString()};}
-  }} finally {scheduleReadBusy=false;render();}
-}
+async function refreshTeamRequests() { return refreshScheduleReads(); }
 async function dbShiftsCheck(accId, J, auto = true, bg = false) {
   const site = ((CONN.pilot || {}).site || {})[accId] || W.LOCNAME[W.ACC[accId].site] || 'Barranquilla';
-  try { J = J || await dbReadTeam(accId, null, { check:true, bg }); } catch (e) { DB.chk = DB.chk || {}; DB.chk[accId] = { err:e.message, at:new Date().toLocaleTimeString() }; return render(); }
+  J = J || DB.lastJ[accId]; if (!J) { DB.chk = DB.chk || {}; DB.chk[accId] = { err:'No Shifts data loaded yet', at:new Date().toLocaleTimeString() }; return render(); }
   await dbSaveTeamCache(accId,J);
   DB.requests = DB.requests || {};
   DB.requestReasons=DB.requestReasons||{}; DB.requestReasons[accId]=J.reasons || [];
@@ -4846,11 +4806,11 @@ function connStatusPanel() {
   const C = CONN, P = C.pilot || {}, T = DB.teams || {}, accs = readAccs(), ago = t => { const m = Math.round((Date.now() - Date.parse(t)) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.round(m / 60) + ' h ago'; };
   const pill = st => `<span class="pill ${({ ok:'ok', warn:'warn', bad:'bad', off:'muted' })[st]}"><i></i>${({ ok:'OK', warn:'Check', bad:'Broken', off:'Off' })[st]}</span>`;
   const okRead = accs.filter(a => (T[a] || {}).st === 'ok'), failRead = accs.filter(a => (T[a] || {}).st === 'failed');
-  const feed = DB.feedRows || [], fresh = feed.filter(f => f.ok && Date.now() - Date.parse(f.read_at) < 60 * 60000), feedMissing = accs.filter(a => !feed.some(f => f.account_id === a));
+  const feed = DB.feedRows || [], fresh = feed.filter(f => f.ok && Date.now() - Date.parse(f.read_at) < 30 * 60000), feedMissing = accs.filter(a => !feed.some(f => f.account_id === a));
   const rows = [
     ['Database', DB.on ? 'ok' : 'bad', DB.on ? 'Signed in to the Workforce Tool database.' : 'Not connected. Sign in again; if it persists, check the database link below.'],
-    ['Reading from Shifts (reader flow)', !C.readUrl ? 'bad' : failRead.length ? 'bad' : 'ok', !C.readUrl ? 'No reader link. Paste it in Receiving from Shifts below.' : `${accs.length} account${accs.length === 1 ? '' : 's'} read from Shifts${okRead.length < accs.length ? ` · ${okRead.length} loaded so far` : ''}${failRead.length ? ' · failed: ' + failRead.map(a => W.ACC[a].name + ' (' + ((T[a] || {}).why || '') + ')').join(', ') : ''}.`],
-    ['Server feed (Supabase, every 30 min)', DB.feedRows === undefined ? 'warn' : !feed.length ? 'warn' : feed.some(f => !f.ok) || fresh.length < feed.length || feedMissing.length ? 'warn' : 'ok',
+    ['Shifts reader link (used by the server)', !C.readUrl ? 'bad' : failRead.length ? 'bad' : 'ok', !C.readUrl ? 'No reader link. Paste it in Receiving from Shifts below.' : `${accs.length} account${accs.length === 1 ? '' : 's'} read from Shifts${okRead.length < accs.length ? ` · ${okRead.length} loaded so far` : ''}${failRead.length ? ' · failed: ' + failRead.map(a => W.ACC[a].name + ' (' + ((T[a] || {}).why || '') + ')').join(', ') : ''}.`],
+    ['Server reads Shifts (every 15 min)', DB.feedRows === undefined ? 'warn' : !feed.length ? 'warn' : feed.some(f => !f.ok) || fresh.length < feed.length || feedMissing.length ? 'warn' : 'ok',
       DB.feedRows === undefined ? 'Checking…' : DB.feedErr ? 'Not readable: ' + DB.feedErr : feed.map(f => `${(W.ACC[f.account_id] || { name:f.account_id }).name} ${f.ok ? ago(f.read_at) : 'failed: ' + (f.error || '')}`).join(' · ') + (feedMissing.length ? ' · not read yet: ' + feedMissing.map(a => W.ACC[a].name).join(', ') + ' (new accounts join the next round)' : '')],
     ['Publishing to Shifts', !C.pubUrl ? 'bad' : (P.accounts || []).some(a => W.ACC[a] && !sendState(a).team) ? 'warn' : (P.accounts || []).length ? 'ok' : 'off', !C.pubUrl ? 'No publishing link. Paste it in Sending to Shifts below.' : (P.accounts || []).length ? 'Publishes for ' + P.accounts.filter(a => W.ACC[a]).map(a => { const x = sendState(a); return W.ACC[a].name + (!x.team ? ' (no Shifts team)' : x.mode === 'preview' ? ' (preview only)' : ''); }).join(', ') + '.' + (W.ACCOUNTS.some(a => !P.accounts.includes(a.id)) ? ' Not sending: ' + W.ACCOUNTS.filter(a => !P.accounts.includes(a.id)).map(a => a.name).join(', ') + '.' : '') : 'Link set, but no account publishes yet. Tick accounts in the controls below.'],
     ['Time off to Shifts (PTO flow)', C.flowUrl ? 'ok' : 'warn', C.flowUrl ? 'Approved leave is sent to Shifts.' : 'No PTO flow link: leave stays in the tool only.'],
@@ -5830,8 +5790,8 @@ const A = {
   coCopyGo: async () => { const t = $('coTxt'); try { await navigator.clipboard.writeText(t.value); toast('Copied · paste it in Teams'); } catch (e) { t.select(); document.execCommand('copy'); toast('Copied'); } },
   chkType: el => { S.chk.type = el.dataset.v; S.chk.page = 0; render(); },
   chkPage: el => { S.chk.page += +el.dataset.v; render(); },
-  reqRefresh: async () => { if (scheduleReadBusy) return toast('Already reading Teams… the list updates when it finishes'); if (!DB.on || !CONN.readUrl) return toast('Teams requests can\'t refresh: the Shifts reader isn\'t connected (Connected services)'); toast('Reading Teams requests…'); await refreshTeamRequests(); const e = Object.values(DB.requests || {}).map(x => x.err).filter(Boolean); toast(e.length ? 'Some requests didn\'t load: ' + e[0] : 'Teams requests refreshed'); },
-  chkRun: () => { toast('Reading Shifts…'); dbShiftsCheck(S.chk.acc, null, ['Admin','RTA'].includes(W.ME.role)); },
+  reqRefresh: async () => { if (scheduleReadBusy) return toast('Already reading Teams… the list updates when it finishes'); if (!DB.on) return toast('Teams requests refresh with live data only'); await refreshScheduleReads(); },
+  chkRun: () => { if (!DB.on) return toast('Reading Shifts works with live data only'); refreshScheduleReads(); },
   chkTake: el => { const c = W.SCHK[S.chk.acc], r = c && c.rows.find(x => x.k === el.dataset.v); if (!r) return; W.adoptShifts(r); r.done = true; c.rows = c.rows.filter(x => x !== r); c.st.side[r.side]--; c.st[r.type]--; c.st.match++; toast(`${r.a.name} · ${fmtS(r.d)} now matches Shifts`); render(); },
   chkTakeAll: () => { const c = W.SCHK[S.chk.acc]; if (!c) return; const t = c.rows.filter(r => r.side === 'shifts'); t.forEach(r => W.adoptShifts(r)); toast(`${t.length} day${t.length === 1 ? '' : 's'} taken from Shifts`); dbShiftsCheck(S.chk.acc, null, false); },
   chkSend: el => { const c = W.SCHK[S.chk.acc], r = c && c.rows.find(x => x.k === el.dataset.v); if (!r) return; W.queueSync(r.a, 'Replace shift', [r.d], 'schedule/shifts', null, 'Queued'); toast(`Sending ${r.a.name} · ${fmtS(r.d)} to Shifts`); },
