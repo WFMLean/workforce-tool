@@ -586,6 +586,8 @@ a.btn{text-decoration:none}
 .bcopy{min-height:24px;min-width:24px}
 td.c,th.c{text-align:center;padding-left:3px;padding-right:3px}
 td.iss .pill{white-space:normal;margin:1px 0}
+.strip .l{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3}
+.tw.tall{max-height:560px;overflow:auto}
 details.how{margin:0 0 10px}details.how>summary{cursor:pointer;color:var(--ink3);font-size:12.5px;font-weight:600}details.how>summary:hover{color:var(--ink)}details.how p{margin:6px 0 0}
 .side .foot{background:color-mix(in srgb,var(--ground) 94%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--glass-line);margin-top:auto;z-index:2}
 .pendbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--tintA) 45%,transparent);background:color-mix(in srgb,var(--tintA) 12%,var(--glass))}
@@ -2421,19 +2423,19 @@ function absPatterns(f = {}) {
 }
 function adhStats(f) {
   const days = range(f.from, f.to > TODAY ? TODAY : f.to), ags = agentsIn(f);
-  const T = { span: 0, inA: 0, log: 0, late: 0, lateMin: 0, early: 0, nol: 0, days: 0 }, byLob = {}, byDay = {}, byAg = [], byAcc = {};
+  const T = { span: 0, inA: 0, log: 0, late: 0, lateMin: 0, early: 0, nol: 0, days: 0 }, byLob = {}, byDay = {}, byAg = [], byAcc = {}, byLobDay = {};   // byLobDay: 'station#date' so one pass can be split into weeks / months
   const b = (o, k) => o[k] || (o[k] = { k, span: 0, inA: 0, log: 0, late: 0, lateMin: 0, early: 0, nol: 0, days: 0 });
   ags.forEach(a => {
     const g = { a, span: 0, inA: 0, log: 0, late: 0, lateMin: 0, early: 0, nol: 0, days: 0, gaps: 0, missing:0, leave:0, unscheduled:0, list: [] };
     days.forEach(d => {
       const A = adh(a, d); if (!A) {const s=sched(a,d);if(!s.working)g.unscheduled++;else if(fullOff(s))g.leave++;else if(!loginKnown(a,d))g.missing++;return;}
-      const x = [T, b(byLob, a.key), b(byDay, d), b(byAcc, a.acc), g];
+      const x = [T, b(byLob, a.key), b(byDay, d), b(byAcc, a.acc), b(byLobDay, a.key + '#' + d), g];
       x.forEach(o => { o.days++; o.span += A.span; o.inA += A.inA; o.log += A.log; if (A.lateFlag) { o.late++; o.lateMin += A.late; } if (A.earlyFlag) o.early++; if (A.noLogin) o.nol++; });
       g.gaps += A.gaps; g.list.push({ d, A });
     });
     byAg.push(g);
   });
-  return { days, T, byLob, byDay, byAg, byAcc };
+  return { days, T, byLob, byDay, byAg, byAcc, byLobDay };
 }
 
 /* ---------- shared widgets (designs style the classes) ---------- */
@@ -2527,7 +2529,9 @@ const stPill = st => `<span class="pill ${W.STATUS[st][1]}"><i></i>${W.STATUS[st
 const vPill = v => `<span class="pill ${({ok:'ok', tight:'warn', short:'bad', closed:'muted'})[v]}">${({ok:'Covered', tight:'Near configured reference', short:'Below configured reference', closed:'No saved shift to compare'})[v]}</span>`;
 const shiftHours = c => { if (c === 'OFF') return []; const s = W.SHIFTS[c], o = []; for (let h = 0; h < 24; h++) { const m = h * 60 + 30; if (m >= s.s && m < Math.min(s.e, 1440)) o.push(h); } return o; };
 const reqVerdict = r => r.status === 'Pending' ? W.worst(W.reqCoverage(r)) : 'ok';
-const vsTarget = (v, t, higherBetter) => v == null ? '' : `<span class="pill ${(higherBetter ? v >= t : v <= t) ? 'ok' : 'bad'}">${v > t ? '+' : ''}${(v - t).toFixed(1)} pts</span>`;
+/* one colour rule for targets: on target = ok · just missed = warn (adherence within 2 pts, absence within 25% over) · further = bad */
+const tone = (v, t, higherBetter = true) => v == null || isNaN(v) ? '' : higherBetter ? (v >= t ? 'ok' : v >= t - 2 ? 'warn' : 'bad') : (v <= t ? 'ok' : v <= t * 1.25 ? 'warn' : 'bad');
+const vsTarget = (v, t, higherBetter) => v == null ? '' : `<span class="pill ${tone(v, t, higherBetter)}">${v > t ? '+' : ''}${(v - t).toFixed(1)} pts</span>`;
 let tt; const toast = m => { const t = $('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2600); };
 
 /* ---------- render ---------- */
@@ -2733,7 +2737,7 @@ const REVIEW_FAQ = [
 function reviewFaq() {return `<section class="panel guide-article"><h2>Common questions</h2>${REVIEW_FAQ.map(([q,a])=>`<details class="faq"><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</section>`;}
 const HELP = {q:'', topic:null};
 const pageName = k => (PAGES.find(x => x[0] === k) || [k,k])[1];
-const NO_INTRO = ['live','overview','builder','schedule','shiftchk','schaudit','whatif','planvs'];
+const NO_INTRO = ['live','overview','builder','schedule','shiftchk','schaudit','whatif','planvs','adherence','abs','ot','audit'];
 function pageIntro() {
   const g = GUIDE.find(x => x[0] === S.page);
   return g ? `<div class="page-guide"><span><b>${esc(pageName(S.page))}</b> · ${esc(g[2])}</span><button class="btn sm" data-a="pageHelp">Step-by-step help</button></div>` : '';
@@ -3145,38 +3149,38 @@ function logAbsDrawer(id, d) {
 function adhRange() { const g = S.adhG || 'day'; return periodRange(g, g === 'month' ? S.adhMo : g === 'week' ? S.adhW : S.adhP); }
 function pAdherence() {
   const AR = adhRange(), grain = S.adhG || 'day', to = AR.to, from = AR.from;
-  const f = { from, to, acc:S.acc, lob:S.adhLob, keys:reportKeys(UX.adhStations) }, A = W.adhStats(f);
+  const f = { from, to, acc:S.acc, lob:S.adhLob, keys:reportKeys(UX.adhStations) }, A = adhCached(f);
   const tgt = S.acc === 'all' ? 95 : W.ACC[S.acc].adhTarget, tot = pct(A.T.inA, A.T.span), conf = pct(A.T.log, A.T.span);
   const missingPeople=A.byAg.filter(g=>g.missing).length;
   const days = Object.values(A.byDay).sort((a, b) => a.k.localeCompare(b.k));
-  const PT = grain === 'day' ? null : AR.per.map(pp => W.adhStats({ ...f, from:pp.s, to:pp.e }));   // one total per week / month
+  const PT = grain === 'day' ? null : adhSplit(A, AR.per);   // one total per week / month, from the same pass
   const pts = PT ? AR.per.map((pp, i) => ({ k:pp.s, inA:PT[i].T.inA, log:PT[i].T.log, span:PT[i].T.span })) : days;
-  const perLobs = [...new Set((PT || []).flatMap(x => Object.keys(x.byLob)))].sort(), adhCell = (o, t) => !o || !o.span ? '<td class="n meta">—</td>' : `<td class="n" style="color:${pct(o.inA, o.span) >= t ? 'var(--ok)' : 'var(--bad)'}">${fmtPct(pct(o.inA, o.span))}<div class="meta">${o.late} late · ${o.nol} no login</div></td>`;
+  const perLobs = [...new Set((PT || []).flatMap(x => Object.keys(x.byLob)))].sort(), adhCell = (o, t) => !o || !o.span ? '<td class="n meta">—</td>' : `<td class="n" style="color:var(--${tone(pct(o.inA, o.span), t)})">${fmtPct(pct(o.inA, o.span))}<div class="meta">${o.late} late · ${o.nol} no login</div></td>`;
   const ags = A.byAg.sort((a, b) => pct(a.inA, a.span) - pct(b.inA, b.span));
-  return loginBanner() + histNotice() + `<p class="note">${A.byAg.length} active people in this selection · ${missingPeople} with scheduled days lacking imported clock-ins. Missing attendance is shown as unavailable and excluded from percentages. Off and full-day leave are excluded.</p><div class="head"><div class="grow"><div class="kicker">Logins vs schedule · ${esc(W.CFG.loginSource)}</div><h1><b>Adherence & work hours</b></h1><p class="sub">${fmtD(from)} – ${fmtD(to)}. Schedule vs actual. <b>Scheduled hours worked</b> = minutes logged in <i>during</i> the scheduled shift ÷ scheduled minutes. <b>Total work hours vs schedule</b> = all minutes logged in that shift day (early, late or overtime included) ÷ scheduled minutes. Days on leave are excluded.</p></div>
+  return loginBanner() + histNotice() + `${missingPeople ? `<p class="note">${missingPeople} of ${A.byAg.length} people have scheduled days with no imported clock-ins. Those days show as unavailable and are left out of the percentages.</p>` : ''}<div class="head"><div class="grow"><div class="kicker">Logins vs schedule · ${esc(W.CFG.loginSource)}</div><h1><b>Adherence & work hours</b></h1><p class="sub">${fmtD(from)} – ${fmtD(to)} · ${A.byAg.length} active people. Schedule vs actual. <b>Scheduled hours worked</b> = minutes logged in <i>during</i> the scheduled shift ÷ scheduled minutes. <b>Total work hours vs schedule</b> = all minutes logged in that shift day (early, late or overtime included) ÷ scheduled minutes. Days on leave are excluded.</p></div>
     <div class="seg">${[['day','By day'],['week','By week'],['month','By month']].map(([k, t]) => `<button class="${grain === k ? 'on' : ''}" data-a="adhG" data-v="${k}">${t}</button>`).join('')}</div>
     <div class="seg">${grain === 'month' ? [[1,'This month'],[2,'2 months'],[3,'3 months']].map(([k, l]) => `<button class="${S.adhMo === k ? 'on' : ''}" data-a="adhMo" data-v="${k}">${l}</button>`).join('') : grain === 'week' ? [4, 8, 12].map(k => `<button class="${S.adhW === k ? 'on' : ''}" data-a="adhW" data-v="${k}">${k} weeks</button>`).join('') : [[1,'Yesterday'],[7,'7 days'],[14,'14 days'],[30,'30 days']].map(([k, l]) => `<button class="${S.adhP === k ? 'on' : ''}" data-a="adhP" data-v="${k}">${l}</button>`).join('')}</div>
     ${stationPick('attendance',spkLobs())}
     <button class="btn" data-a="expAdh">Export CSV</button></div>
   <div class="strip">
-    <div><div class="l">Scheduled hours worked</div><div class="v ${tot >= tgt ? 'ok' : 'bad'}">${fmtPct(tot)}</div><div class="h">Target ${tgt}%</div></div>
-    <div><div class="l">Total work hours vs schedule</div><div class="v ${conf >= tgt ? 'ok' : 'warn'}">${fmtPct(conf)}</div><div class="h">${Math.round(A.T.log / 60).toLocaleString()} h logged of ${Math.round(A.T.span / 60).toLocaleString()} h scheduled</div></div>
+    <div><div class="l">Scheduled hours worked</div><div class="v ${tone(tot, tgt)}">${fmtPct(tot)}</div><div class="h">Target ${tgt}%</div></div>
+    <div><div class="l">Total work hours vs schedule</div><div class="v ${conf >= tgt ? 'ok' : 'warn'}" title="Includes early, late and overtime minutes, so it is informational">${fmtPct(conf)}</div><div class="h">${Math.round(A.T.log / 60).toLocaleString()} h logged of ${Math.round(A.T.span / 60).toLocaleString()} h scheduled</div></div>
     <div><div class="l">Scheduled hours</div><div class="v">${Math.round(A.T.span / 60).toLocaleString()}</div><div class="h">${A.T.days} agent-days</div></div>
     <div><div class="l">Late logins</div><div class="v warn">${A.T.late}</div><div class="h">avg ${A.T.late ? Math.round(A.T.lateMin / A.T.late) : 0} min · grace ${W.CFG.grace} min</div></div>
     <div><div class="l">Early logouts</div><div class="v">${A.T.early}</div><div class="h">Before shift end</div></div>
     <div><div class="l">No login</div><div class="v ${A.T.nol ? 'bad' : ''}">${A.T.nol}</div><div class="h">Scheduled, no absence logged</div></div></div>
   <div class="cols c21" style="margin-bottom:14px">
     <section class="panel"><div class="panel-h"><div class="grow"><h2>${grain === 'month' ? 'Monthly' : grain === 'week' ? 'Weekly' : 'Daily'} scheduled hours and total work hours</h2><p class="sub">Percent of scheduled hours · latest values below${grain === 'day' ? '' : ' · each point is one ' + grain}</p></div></div>${lineChart([{ name:'Scheduled hours worked', color:'var(--acc)', pts:pts.map(x => [x.k, pct(x.inA, x.span)]) }, { name:'Total work hours vs schedule', color:'#f5b84a', pts:pts.map(x => [x.k, pct(x.log, x.span)]) }], tgt, 80, Math.max(100, ...pts.map(x => Math.ceil(pct(x.log, x.span) || 0))))}</section>
-    <section class="panel"><h2 style="margin-bottom:8px">By line of business</h2><table><thead><tr><th>LOB</th><th class="n">Adh.</th><th class="n">Conf.</th><th class="n">Late</th><th class="n">No login</th></tr></thead><tbody>
-      ${Object.values(A.byLob).map(x => { const p = pct(x.inA, x.span), t = W.ACC[x.k.split('|')[0]].adhTarget; return `<tr><td>${esc(lobName(x.k))}</td><td class="n" style="color:${p >= t ? 'var(--ok)' : 'var(--bad)'}">${fmtPct(p)}</td><td class="n">${fmtPct(pct(x.log, x.span))}</td><td class="n">${x.late}</td><td class="n">${x.nol}</td></tr>`; }).join('')}</tbody></table></section></div>
+    <section class="panel"><h2 style="margin-bottom:8px">By line of business</h2><div class="tw"><table><thead><tr><th>LOB</th><th class="n">Adh.</th><th class="n">Conf.</th><th class="n">Late</th><th class="n">No login</th></tr></thead><tbody>
+      ${Object.values(A.byLob).map(x => { const p = pct(x.inA, x.span), t = W.ACC[x.k.split('|')[0]].adhTarget; return `<tr><td>${esc(lobName(x.k))}</td><td class="n" style="color:var(--${tone(p, t)})">${fmtPct(p)}</td><td class="n">${fmtPct(pct(x.log, x.span))}</td><td class="n">${x.late}</td><td class="n">${x.nol}</td></tr>`; }).join('')}</tbody></table></div></section></div>
   ${PT ? `<section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>Scheduled hours worked by ${grain} and line of business</h2><p class="sub">Minutes logged in during the scheduled shift ÷ scheduled minutes, per ${grain}. Green = at or above the account target. Each cell also shows late logins and no-logins. — = no login data uploaded for that ${grain}.${AR.partial ? ` * Teams history starts ${fmtD(AR.covFrom)}, so the first ${grain} is partial.` : ''}</p></div></div>
     <div class="tw"><table><thead><tr><th>Account · LOB</th>${AR.per.map(pp => `<th class="n">${esc(pp.label)}</th>`).join('')}<th class="n">Period</th></tr></thead><tbody>
     ${perLobs.map(k => { const t = W.ACC[k.split('|')[0]].adhTarget; return `<tr><td class="nm">${esc(lobName(k))}</td>${PT.map(x => adhCell(x.byLob[k], t)).join('')}${adhCell(A.byLob[k], t)}</tr>`; }).join('') || `<tr><td colspan="${AR.per.length + 2}"><div class="empty">No login data in this period.</div></td></tr>`}
     ${perLobs.length ? `<tr><td class="nm"><b>Total</b></td>${PT.map(x => adhCell(x.T, tgt)).join('')}${adhCell(A.T, tgt)}</tr>` : ''}
     </tbody></table></div></section>` : ''}
-  <section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>Late vs original and changed schedule</h2><p class="sub">Compare the first login with both captured original and current starts. The grace rule applies to the current schedule. An unavailable original is left blank.</p></div><button class="btn" data-a="expLate">Export comparison CSV</button></div><div class="tw"><table><thead><tr><th>Date</th><th>Agent</th><th>Site / station</th><th>Original start</th><th>Current start</th><th>First login</th><th>Late vs original</th><th>Late vs current</th><th>Change</th></tr></thead><tbody>${lateRows(A).slice(0,100).map(({a,d,c})=>`<tr><td>${esc(d)}</td><td>${esc(a.name)}</td><td>${esc([a.site,a.station||a.lob].filter(Boolean).join(' · '))}</td><td>${c.originalStart==null?'—':hm(c.originalStart)}</td><td>${c.currentStart==null?'—':hm(c.currentStart)}</td><td>${c.first==null?'No login':hm(c.first)}</td><td>${c.originalLate==null?'—':c.originalLate+' min'}</td><td>${c.currentLate==null?'—':c.currentLate+' min'+(W.isLate(c.currentLate)?' · Late':'')}</td><td>${c.changed?'Changed':'Same'}<div class="meta">${esc([c.changeAt,c.changeBy,c.reason].filter(Boolean).join(' · '))}</div></td></tr>`).join('')}</tbody></table></div><p class="note">${lateRows(A).length} late, changed or no-login days. Showing up to 100; export includes every matching day in the selected period.</p></section>
+  <section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>Late vs original and changed schedule</h2><p class="sub">Compare the first login with both captured original and current starts. The grace rule applies to the current schedule. An unavailable original is left blank.</p></div><button class="btn" data-a="expLate">Export comparison CSV</button></div><div class="tw tall"><table><thead><tr><th>Date</th><th>Agent</th><th>Site / station</th><th>Original start</th><th>Current start</th><th>First login</th><th>Late vs original</th><th>Late vs current</th><th>Change</th></tr></thead><tbody>${lateRows(A).slice(0,100).map(({a,d,c})=>`<tr><td>${esc(d)}</td><td>${esc(a.name)}</td><td>${esc([a.site,a.station||a.lob].filter(Boolean).join(' · '))}</td><td>${c.originalStart==null?'—':hm(c.originalStart)}</td><td>${c.currentStart==null?'—':hm(c.currentStart)}</td><td>${c.first==null?'No login':hm(c.first)}</td><td>${c.originalLate==null?'—':c.originalLate+' min'}</td><td>${c.currentLate==null?'—':c.currentLate+' min'+(W.isLate(c.currentLate)?' · Late':'')}</td><td>${c.changed?'Changed':'Same'}<div class="meta">${esc([c.changeAt,c.changeBy,c.reason].filter(Boolean).join(' · '))}</div></td></tr>`).join('')}</tbody></table></div><p class="note">${lateRows(A).length} late, changed or no-login days. Showing up to 100; export includes every matching day in the selected period.</p></section>
   <section class="panel"><div class="panel-h"><div class="grow"><h2>Agents</h2><p class="sub">Lowest adherence first. Click an agent to see each day's schedule against their logins.</p></div></div>
-    <div class="tw"><table><thead><tr><th>Agent</th><th>LOB</th><th>Team lead</th><th class="n">Days</th><th class="n">Sched. h</th><th class="n">In adh. h</th><th class="n">Logged h</th><th class="n">Scheduled hours worked</th><th class="n">Total work hours vs schedule</th><th>vs target</th><th class="n">Late</th><th class="n">Avg late</th><th class="n">Early out</th><th class="n">Logged out</th><th class="n">No login</th></tr></thead><tbody>
+    <div class="tw tall"><table><thead><tr><th>Agent</th><th>LOB</th><th>Team lead</th><th class="n">Days</th><th class="n">Sched. h</th><th class="n">In adh. h</th><th class="n">Logged h</th><th class="n">Scheduled hours worked</th><th class="n">Total work hours vs schedule</th><th>vs target</th><th class="n">Late</th><th class="n">Avg late</th><th class="n">Early out</th><th class="n">Logged out</th><th class="n">No login</th></tr></thead><tbody>
     ${ags.slice((S.adhPg || 0) * 40, (S.adhPg || 0) * 40 + 40).map(g => { const p = pct(g.inA, g.span); return `<tr class="click" data-a="adhAg" data-v="${g.a.id}"><td class="nm">${esc(g.a.name)}${!g.days?`<div class="meta">${g.missing?g.missing+' days without attendance data':g.leave?'Leave / Off in this period':'No scheduled work in this period'}</div>`:''}</td><td>${esc(g.a.lob)}</td><td>${esc(g.a.tl)}</td><td class="n">${g.days}</td><td class="n">${(g.span / 60).toFixed(1)}</td><td class="n">${(g.inA / 60).toFixed(1)}</td><td class="n">${(g.log / 60).toFixed(1)}</td><td class="n"><b>${fmtPct(p)}</b></td><td class="n">${fmtPct(pct(g.log, g.span))}</td><td>${vsTarget(p, W.ACC[g.a.acc].adhTarget, true)}</td><td class="n">${g.late || ''}</td><td class="n">${g.late ? Math.round(g.lateMin / g.late) + ' min' : ''}</td><td class="n">${g.early || ''}</td><td class="n">${g.gaps || ''}</td><td class="n">${g.nol ? `<b style="color:var(--bad)">${g.nol}</b>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
     ${ags.length > 40 ? `<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:10px"><span class="meta">${(S.adhPg || 0) * 40 + 1}–${Math.min(ags.length, (S.adhPg || 0) * 40 + 40)} of ${ags.length} · lowest adherence first</span><button class="btn sm" data-a="adhPg" data-v="-1" ${S.adhPg ? '' : 'disabled'}>←</button><button class="btn sm" data-a="adhPg" data-v="1" ${((S.adhPg || 0) + 1) * 40 < ags.length ? '' : 'disabled'}>→</button></div>` : ''}</section>`;
 }
@@ -3204,6 +3208,20 @@ function periodRange(grain, count) {
   const to = count === 1 ? addD(TODAY, -1) : TODAY, from = addD(to, -(count - 1));
   return { from, to, per:range(from, to).map(d => ({ s:d, e:d, label:fmtS(d) })), covFrom, partial:from < covFrom };
 }
+/* adhStats once for the whole range, then summed per week / month (same totals as one adhStats call per period, ~8x faster) */
+const ADH_MEMO = new Map();   // report passes reused until any data changes (OV_REV), the location filter changes, or 12 are kept
+function adhCached(f) {
+  const k = OV_REV + '|' + W.LOCF.v + '|' + JSON.stringify(f, (n, v) => v instanceof Set ? [...v].sort() : v);
+  if (!ADH_MEMO.has(k)) { if (ADH_MEMO.size > 11) ADH_MEMO.delete(ADH_MEMO.keys().next().value); ADH_MEMO.set(k, W.adhStats(f)); }
+  return ADH_MEMO.get(k);
+}
+function adhSplit(all, per) {
+  const F = ['span','inA','log','late','lateMin','early','nol','days'], z = k => F.reduce((o, n) => (o[n] = 0, o), { k }), add = (o, x) => F.forEach(n => o[n] += x[n]);
+  return per.map(pp => { const T = z(), byLob = {};
+    Object.values(all.byDay).forEach(x => { if (x.k >= pp.s && x.k <= pp.e) add(T, x); });
+    Object.values(all.byLobDay).forEach(x => { const i = x.k.lastIndexOf('#'), k = x.k.slice(0, i), d = x.k.slice(i + 1); if (d >= pp.s && d <= pp.e) add(byLob[k] || (byLob[k] = z(k)), x); });
+    return { T, byLob }; });
+}
 function absRange() {
   const TODAY = repToday();
   const covFrom = addD(TODAY, -84), mStart = back => { const [y, m] = TODAY.split('-').map(Number); return new Date(Date.UTC(y, m - 1 - back, 1)).toISOString().slice(0, 10); };
@@ -3225,7 +3243,7 @@ function pAbs() {
   const accLines = (S.acc === 'all' ? W.ACCOUNTS : [W.ACC[S.acc]]).map((acc, i) => ({ name:acc.name, color:['var(--acc)','#f5b84a','#b98cff','#4fd1a5','#ff8a80','#7aa7ff'][i % 6], pts:per.map(pp => { let s = 0, ab = 0; W.AG.filter(a => a.acc === acc.id && (S.absLob === 'all' || a.key === S.absLob) && reportKeys(UX.absStations).has(a.key)).forEach(a => range(pp.s, pp.e).forEach(d => { if (d > TODAY) return; const sc = W.sched(a, d); if (!sc.working) return; s++; if (sc.absence) ab++; })); return [pp.s, pct(ab, s)]; }) }));
   const shade = (v, t) => v == null ? '' : `background:color-mix(in srgb,${v > t * 1.25 ? 'var(--bad) 42%' : v > t ? 'var(--warn) 32%' : 'var(--ok) 22%'},transparent)`;
   /* late arrivals per period: days with a late first login ÷ scheduled days that have login data (adh() skips days with no upload) */
-  const LF = { acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations) }, LT = per.map(pp => W.adhStats({ ...LF, from:pp.s, to:pp.e })), LA = W.adhStats({ ...LF, from, to:TODAY });
+  const LF = { acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations) }, lastE = per[per.length - 1].e, ALL = adhCached({ ...LF, from, to:lastE }), LT = adhSplit(ALL, per), LA = (lastE < W.TODAY ? lastE : W.TODAY) === (TODAY < W.TODAY ? TODAY : W.TODAY) ? ALL : adhCached({ ...LF, from, to:TODAY });
   const lateCell = o => !o || !o.days ? '<td class="n meta">—</td>' : `<td class="n">${fmtPct(pct(o.late, o.days))}<div class="meta">${o.late} late${o.late ? ' · ' + Math.round(o.lateMin / o.late) + ' min avg' : ''}</div></td>`;
   const lateLobs = [...new Set(LT.flatMap(x => Object.keys(x.byLob)))].sort(), lateTop = LA.byAg.filter(g => g.late).sort((x, y) => y.late - x.late || y.lateMin - x.lateMin).slice(0, 15);
   return HN + `<div class="head"><div class="grow"><div class="kicker">${fmtD(from)} – ${fmtD(TODAY)} · full-day absences on scheduled days</div><h1><b>Absence report</b> analysis</h1><p class="sub">ABS % = absent scheduled hours ÷ scheduled hours, from each person's real shift length. Part days (Late in, Early out) count the hours actually lost, from the logins. Planned = booked in advance. Unplanned = call-outs, emergencies and no-shows. A reason that isn't on the approved list is <b>unclassified</b>, never guessed.</p></div>
@@ -3234,11 +3252,11 @@ function pAbs() {
     ${stationPick('absence',spkLobs())}
     <button class="btn" data-a="expAbs">Export CSV</button></div>
   <div class="strip"><div><div class="l">Active people</div><div class="v">${W.AG.filter(a => accOk(a) && reportKeys(UX.absStations).has(a.key)).length}</div><div class="h">Active roster in this selection</div></div><div><div class="l">Scheduled shifts</div><div class="v">${T.sched}</div><div class="h">${Hh(T.schedM)} scheduled hours in this period</div></div>
-    <div><div class="l">ABS % (hours)</div><div class="v ${absH > tgt ? 'bad' : 'ok'}">${fmtPct(absH)}</div><div class="h">Target ${tgt}% · ${absH > tgt ? '+' : ''}${absH == null ? 'No scheduled hours to compare' : ((absH || 0) - tgt).toFixed(1) + ' pts'} · by days ${fmtPct(abs)}</div></div>
+    <div><div class="l">ABS % (hours)</div><div class="v ${tone(absH, tgt, false)}">${fmtPct(absH)}</div><div class="h">Target ${tgt}% · ${absH > tgt ? '+' : ''}${absH == null ? 'No scheduled hours to compare' : ((absH || 0) - tgt).toFixed(1) + ' pts'} · by days ${fmtPct(abs)}</div></div>
     <div><div class="l">Unplanned</div><div class="v warn">${Hh(T.unM)} h</div><div class="h">${fmtPct(pct(T.unM, T.schedM))} · ${T.un} days${T.part ? ` + ${T.part} part days (${Hh(T.partM)} h${T.partUnknown ? `, ${T.partUnknown} with no logins` : ''})` : ''}</div></div>
     <div><div class="l">Planned</div><div class="v">${Hh(T.plM)} h</div><div class="h">${fmtPct(pct(T.plM, T.schedM))} · ${T.pl} days</div></div>
     ${T.uc ? `<div><div class="l">Unclassified</div><div class="v warn">${Hh(T.ucM)} h</div><div class="h">${T.uc} days · map the reason in Absence reasons</div></div>` : ''}
-    <div><div class="l">Absence hours vs configured target</div><div class="v ${absM > allowM ? 'bad' : 'ok'}">${fmtPct(pct(absM, allowM), 0)}</div><div class="h">${Hh(absM)} of ${Hh(allowM)} h (${tgt}% of ${Hh(T.schedM)} scheduled h; target from Tool settings, not leave entitlement)</div></div>
+    <div><div class="l">Absence hours vs configured target</div><div class="v ${absM > allowM ? 'bad' : 'ok'}">${fmtPct(pct(absM, allowM), 0)}</div><div class="h" title="${tgt}% of ${Hh(T.schedM)} scheduled hours. The target comes from Tool settings; it is not a leave entitlement.">${Hh(absM)} of ${Hh(allowM)} h allowed</div></div>
     <div><div class="l">Average agents out</div><div class="v">${T.avgOutDay.toFixed(1)} / day</div><div class="h">${T.avgOutWeek.toFixed(1)} different people per week${T.partialWeek ? ' · this week is partial' : ''}</div></div></div>
   <section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>ABS % by ${grain} and line of business</h2><p class="sub">Green = within target · amber = above target · red = more than 25% above target${AR.partial ? ` · * Teams history starts ${fmtD(AR.covFrom)}, so the first ${grain} is partial` : ''}</p></div></div>
     <div class="tw"><table><thead><tr><th>Account · LOB</th>${per.map(pp => `<th class="n">${esc(pp.label)}</th>`).join('')}<th class="n">Period</th><th class="n">Unpl.</th><th>vs target</th></tr></thead><tbody>
@@ -3352,7 +3370,7 @@ function pAudit() {
     <select class="in" data-f="audUser" aria-label="User"><option value="all">All users</option>${users.map(u => `<option ${F.user === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}</select>
     <div class="seg">${[[7,'7 d'],[30,'30 d'],[120,'All']].map(([k, l]) => `<button class="${F.days === k ? 'on' : ''}" data-a="audDays" data-v="${k}">${l}</button>`).join('')}</div>
     <input class="in" id="audQ" data-f="audQ" placeholder="Search agent, ID, reason…" value="${esc(F.q)}" style="width:220px"><button class="btn" data-a="expAud">Export CSV</button></div>
-  <section class="panel"><div class="tw"><table><thead><tr><th>When</th><th>User</th><th>Module</th><th>Action</th><th>Record</th><th>Before</th><th>After</th><th>Note</th></tr></thead><tbody>
+  <section class="panel"><div class="tw tall"><table><thead><tr><th>When</th><th>User</th><th>Module</th><th>Action</th><th>Record</th><th>Before</th><th>After</th><th>Note</th></tr></thead><tbody>
     ${pageRows.map(x => `<tr><td class="num" style="white-space:nowrap">${esc(x.at)}</td><td style="white-space:nowrap">${esc(x.user)}</td><td><span class="pill">${esc(x.module)}</span></td><td>${esc(x.action)}</td><td class="nm">${esc(x.record)}</td><td class="meta">${esc(x.before)}</td><td>${esc(x.after)}</td><td class="meta">${esc(x.note)}</td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">No entries match.</div></td></tr>'}</tbody></table></div>
     ${rows.length > 100 ? `<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:10px"><span class="meta">${F.page * 100 + 1}–${Math.min(rows.length, F.page * 100 + 100)} of ${rows.length}</span><button class="btn sm" data-a="audPage" data-v="-1" ${F.page ? '' : 'disabled'}>←</button><button class="btn sm" data-a="audPage" data-v="1" ${(F.page + 1) * 100 < rows.length ? '' : 'disabled'}>→</button></div>` : ''}</section>`;
 }
