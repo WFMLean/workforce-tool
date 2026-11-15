@@ -580,6 +580,9 @@ a.btn{text-decoration:none}
 :root[data-theme="light"] .hc.short{color:#8f1d28}:root[data-theme="light"] .hc.tight{color:#6e4700}
 details.how{margin:0 0 10px}details.how>summary{cursor:pointer;color:var(--ink3);font-size:12.5px;font-weight:600}details.how>summary:hover{color:var(--ink)}details.how p{margin:6px 0 0}
 .side .foot{background:color-mix(in srgb,var(--ground) 94%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--glass-line);margin-top:auto;z-index:2}
+.pendbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--tintA) 45%,transparent);background:color-mix(in srgb,var(--tintA) 12%,var(--glass))}
+.pendbar [data-pend]{font-variant-numeric:tabular-nums;font-weight:700}
+kbd{font:600 10.5px ui-monospace,monospace;border:1px solid var(--glass-line);border-radius:4px;padding:0 4px;margin-left:4px;opacity:.85}
 details.adv{margin-top:14px}details.adv>summary{cursor:pointer;padding:12px 16px;border:1px solid var(--glass-line);border-radius:14px;background:var(--glass);font-weight:600;color:var(--ink2);list-style-position:inside}
 details.adv[open]>summary{margin-bottom:14px}details.adv>summary:hover{color:var(--ink)}
 @media (max-width:780px){.top{flex-wrap:wrap}}
@@ -2932,6 +2935,19 @@ function missingPanel(rows, c) {
 }
 
 /* ---------- PTO REQUESTS ---------- */
+/* Inbox decisions wait 10 s before anything happens (2026-11-15): the decision runs only when the countdown ends, so Undo has
+   nothing to reverse. Leaving the page with a countdown running asks first. */
+const PEND = {};
+let pendIv = null;
+function holdDecision(id, label, run) {
+  PEND[id] = { label, until:Date.now() + 10000, run, timer:setTimeout(() => { const p = PEND[id]; if (!p) return; delete PEND[id]; p.run(); render(); }, 10000) };
+  render();
+  if (!pendIv) pendIv = setInterval(() => { const ids = Object.keys(PEND); if (!ids.length) { clearInterval(pendIv); pendIv = null; return; }
+    ids.forEach(k => document.querySelectorAll(`[data-pend="${k}"]`).forEach(el => { el.textContent = Math.max(0, Math.ceil((PEND[k].until - Date.now()) / 1000)) + ' s'; })); }, 250);
+}
+function undoDecision(id) { const p = PEND[id]; if (!p) return; clearTimeout(p.timer); delete PEND[id]; toast(p.label + ' undone · nothing was sent'); render(); }
+const pendBar = id => PEND[id] ? `<div class="pendbar" role="status"><span><b>${esc(PEND[id].label)}</b> in <span data-pend="${id}">${Math.max(0, Math.ceil((PEND[id].until - Date.now()) / 1000))} s</span> · nothing is sent until then</span><button class="btn sm" data-a="undoDec" data-v="${id}">Undo <kbd>u</kbd></button></div>` : '';
+self.addEventListener('beforeunload', e => { if (!Object.keys(PEND).length) return; e.preventDefault(); e.returnValue = ''; });
 function pRequests() {
   const list = W.REQ.filter(r => accOk(W.AGI[r.agent]) && (S.reqTab === 'Pending' ? r.status === 'Pending' : r.status !== 'Pending'))
     .sort((a, b) => S.reqTab === 'Pending' ? a.from.localeCompare(b.from) : b.decidedAt.localeCompare(a.decidedAt));
@@ -2940,10 +2956,10 @@ function pRequests() {
   return `<div class="head"><div class="grow"><div class="kicker">From Microsoft Teams</div><h1>PTO <b>requests</b></h1><p class="sub">Every request shows the headcount for each day and hour before you decide. Decisions go back to Teams and Shifts.</p></div>
     <button class="btn" data-a="reqRefresh" ${scheduleReadBusy ? 'disabled' : ''}>${scheduleReadBusy ? 'Reading Teams…' : 'Refresh Teams requests'}</button><div class="seg">${['Pending','Decided'].map(k => `<button class="${S.reqTab === k ? 'on' : ''}" data-a="reqTab" data-v="${k}">${k} <span class="num" style="opacity:.6">${W.REQ.filter(x => accOk(W.AGI[x.agent]) && (k === 'Pending' ? x.status === 'Pending' : x.status !== 'Pending')).length}</span></button>`).join('')}</div></div>
   ${DB.on ? `<div class="note">${W.LIVE.accs.filter(inScope).map(acc => {const q=(DB.requests || {})[acc];return esc(W.ACC[acc].name) + ': ' + (!q ? 'requests not checked yet' : q.err ? esc(q.err) : q.count + ' requests · checked ' + esc(q.at) + (q.unmatched ? ' · ' + q.unmatched + ' could not be matched to the roster' : ''));}).join(' · ')}</div>` : ''}
-  <div class="cols c12"><div>${list.length > 60 ? `<p class="meta" style="margin:0 0 8px">Showing the first 60 of ${list.length}. Narrow the account or location to see the rest.</p>` : ''}${list.slice(0, 60).map(x => { const a = W.AGI[x.agent], v = reqVerdict(x); return `<button class="rq v-${x.status === 'Pending' ? v : x.status === 'Approved' ? 'ok' : 'short'} ${x.id === S.sel ? 'on' : ''}" data-a="selReq" data-v="${x.id}">
+  <div class="cols c12"><div><p class="meta" style="margin:0 0 8px">${S.reqTab === 'Pending' ? 'Soonest leave first' : 'Most recent decision first'} · keys: <kbd>j</kbd>/<kbd>k</kbd> move, <kbd>a</kbd> approve, <kbd>d</kbd> decline, <kbd>u</kbd> undo</p>${list.length > 60 ? `<p class="meta" style="margin:0 0 8px">Showing the first 60 of ${list.length}. Narrow the account or location to see the rest.</p>` : ''}${list.slice(0, 60).map(x => { const a = W.AGI[x.agent], v = reqVerdict(x); return `<button class="rq v-${x.status === 'Pending' ? v : x.status === 'Approved' ? 'ok' : 'short'} ${x.id === S.sel ? 'on' : ''}" data-a="selReq" data-v="${x.id}">
       <div class="top2"><span class="nm">${esc(a.name)}</span>${x.status === 'Pending' ? (v === 'short' ? vPill(v) : v === 'tight' ? '<span class="meta" title="Approving leaves the station exactly at its minimum">at minimum</span>' : '') : `<span class="pill ${x.status === 'Approved' ? 'ok' : 'bad'}">${esc(x.status)}</span>`}</div>
       <div class="meta">${esc(lobName(a.key))} · ${esc(x.reason)} · ${fmtS(x.from)}${x.dates.length > 1 ? '–' + fmtS(x.to) : ''} · ${x.dates.length} day${x.dates.length > 1 ? 's' : ''}</div>
-      <div class="meta">Teams · received ${esc(x.received.slice(5).replace('-', '/'))}</div></button>`; }).join('') || '<div class="empty panel">No requests here.</div>'}</div>
+      <div class="meta">${PEND[x.id] ? `<b>${esc(PEND[x.id].label)}</b> in <span data-pend="${x.id}">10 s</span> · Undo with <kbd>u</kbd>` : `Teams · received ${esc(x.received.slice(5).replace('-', '/'))}`}</div></button>`; }).join('') || '<div class="empty panel">No requests here.</div>'}</div>
     <div>${r ? reqDetail(r) : '<div class="panel empty">Select a request.</div>'}</div></div>`;
 }
 function reqDetail(r) {
@@ -2970,7 +2986,7 @@ function reqDetail(r) {
         <div class="meta">${other.length ? 'Also booked: ' + other.map(x => fmtS(x.from) + ' ' + x.status.toLowerCase()).join(', ') : 'No other leave booked'}</div></div></div>
     ${r.status === 'Pending' ? `<div class="field"><label class="f" for="decNote">Note to the agent (sent with the decision in Teams and Shifts)</label><textarea class="in" id="decNote" data-f="note" rows="2" placeholder="${worst === 'short' ? 'Required to deny or to approve below requirement' : 'Optional'}">${esc(S.note)}</textarea></div>
       ${worst === 'short' ? `<div class="note bad" style="margin-bottom:10px">Approving takes ${esc(lobName(a.key))} below the requirement on ${C.filter(x => x.v === 'short').map(x => fmtS(x.d)).join(', ')}. Add a note explaining the cover.</div>` : ''}
-      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn bad" data-a="deny" data-v="${r.id}">Deny</button><button class="btn pri" data-a="approve" data-v="${r.id}" data-short="${worst === 'short' ? 1 : ''}">Approve &amp; publish to Shifts</button></div>`
+      ${PEND[r.id] ? pendBar(r.id) : `<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn bad" data-a="deny" data-v="${r.id}">Decline <kbd>d</kbd></button><button class="btn pri" data-a="approve" data-v="${r.id}" data-short="${worst === 'short' ? 1 : ''}">Approve &amp; publish to Shifts <kbd>a</kbd></button></div>`}`
       : `<div class="note">${(W.SYNC.find(j => j.agent === a.id && j.endpoint.startsWith('timeOffRequests')) || {}).status ? 'Shifts: ' + W.SYNC.find(j => j.agent === a.id && j.endpoint.startsWith('timeOffRequests')).status : 'Decision recorded in Teams and on the schedule.'}</div>`}
   </section>`;
 }
@@ -3355,7 +3371,8 @@ function pSettings() {
   <section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Publishing to Microsoft Shifts</h2><p class="sub">Each schedule change and PTO decision creates a job. Failed jobs can be retried.</p></div>${W.SYNC.some(j => j.status === 'Draft') ? '<button class="btn pri sm" data-a="publish">Publish drafts</button>' : ''}</div>
     <div class="tw"><table><thead><tr><th>Job</th><th>When</th><th>Agent</th><th>Action</th><th>Dates</th><th>Shifts team · endpoint</th><th>Status</th><th></th></tr></thead><tbody>
     ${W.SYNC.slice(0, 40).map(j => `<tr><td class="num">${j.id}</td><td class="num">${esc(j.at.slice(5))}</td><td>${esc(W.AGI[j.agent].name)}</td><td>${esc(j.action)}${j.notes ? `<div class="meta" title="Note sent to Shifts">Note: ${esc(j.notes)}</div>` : ''}</td><td class="meta">${j.dates.length > 3 ? fmtS(j.dates[0]) + ' + ' + (j.dates.length - 1) : j.dates.map(fmtS).join(', ')}</td><td class="meta"><div style="color:var(--ink2)">${esc(j.team || '—')}</div><span style="font-family:ui-monospace,monospace">${esc(j.endpoint)}</span></td>
-      <td><span class="pill ${({Confirmed:'ok', Failed:'bad', Draft:'warn', Retrying:'warn', 'Preview only':'info'})[j.status] || 'info'}"><i></i>${esc(j.status)}</span>${['Failed','Retrying','Confirmed','Preview only','Not sent'].includes(j.status) && j.msg ? `<div class="meta">${esc(j.msg)}</div>` : ''}</td><td>${j.status === 'Failed' || (j.status === 'Not sent' && /^schedule\/timesOff/.test(j.endpoint)) ? `<button class="btn sm" data-a="retry" data-v="${j.id}">${j.status === 'Failed' ? 'Retry' : 'Send'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">No jobs yet.</div></td></tr>'}</tbody></table></div></section>`;
+      <td><span class="pill ${({Confirmed:'ok', Failed:'bad', Draft:'warn', Retrying:'warn', 'Preview only':'info'})[j.status] || 'info'}"><i></i>${esc(j.status)}</span>${['Failed','Retrying','Confirmed','Preview only','Not sent'].includes(j.status) && j.msg ? `<div class="meta">${esc(j.msg)}</div>` : ''}</td><td>${j.status === 'Failed' || (j.status === 'Not sent' && /^schedule\/timesOff/.test(j.endpoint)) ? `<button class="btn sm" data-a="retry" data-v="${j.id}">${j.status === 'Failed' ? 'Retry' : 'Send'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">No jobs yet.</div></td></tr>'}</tbody></table></div></section>
+  <div style="margin-top:14px">${swapRulesPanel()}</div>`;
 }
 
 /* ---------- OVERVIEW (corporate) ---------- */
@@ -4041,7 +4058,7 @@ function pSwaps() {
   <div class="cols c12"><div>${list.map(x => { const A = W.AGI[x.a], B = W.AGI[x.b], r = x.status === 'Pending approval' ? W.swapCheck(x).result : null;
       return `<button class="rq v-${r ? ({pass:'ok', warn:'tight', fail:'short'})[r] : x.status === 'Approved' ? 'ok' : x.status === 'Declined' ? 'short' : ''} ${x.id === S.swSel ? 'on' : ''}" data-a="swSel" data-v="${x.id}"><div class="top2"><span class="nm">${esc(A.name)} ⇄ ${esc(B.name)}</span>${r ? `<span class="pill ${chk[r][1]}">${({pass:'Passes all rules', warn:'Check warnings', fail:'Breaks a rule'})[r]}</span>` : x.status === 'Waiting for coworker' ? '<span class="pill muted">Waiting</span>' : `<span class="pill ${x.status === 'Approved' ? 'ok' : 'bad'}">${x.auto ? 'Auto-' + x.status.toLowerCase() : x.status}</span>`}</div>
         <div class="meta">${SWT[x.type]} · ${fmtS(x.da)}${x.type === 'days' ? ' ⇄ ' + fmtS(x.db) : ''} · ${esc(lobName(A.key))}${A.key !== B.key ? ' / ' + esc(B.lob) : ''}</div><div class="meta">Teams Shifts · ${esc(x.received.slice(5))}</div></button>`; }).join('') || '<div class="panel empty">Nothing here.</div>'}
-    ${swapRulesPanel()}</div>
+    ${swapRulesSummary()}</div>
     <div>${sw ? swapDetail(sw) : '<div class="panel empty">Select a swap.</div>'}</div></div>`;
 }
 function swapDetail(sw) {
@@ -4065,8 +4082,12 @@ function swapDetail(sw) {
       <div class="panel" style="background:var(--panel2)"><div class="kicker">After approval</div><div class="meta" style="margin-top:6px">Both schedules update, the cells show ⇄ with the swap ID, Shifts gets the approval, and Teams notifies both agents.</div></div></div>
     ${pend && sw.review ? `<div class="note warn" style="margin-bottom:10px"><b>Sent to review by auto-approval:</b> ${esc(sw.review)}</div>` : ''}${sw.teams && (pend || sw.status === 'Waiting for coworker') ? `<div class="note">${sw.status === 'Waiting for coworker' ? `${esc(B.name)} hasn't accepted in Teams yet. ` : ''}Approve or decline this request in Teams → Shifts → Requests. The tool shows it with the rule checks; deciding from the tool comes next.${sw.coworkerNote ? '<br>' + esc(B.name.split(' ')[0]) + ': ' + esc(sw.coworkerNote) : ''}</div>` : pend ? `<div class="field"><label class="f" for="swNote">Note to both agents (sent in Teams)</label><textarea class="in" id="swNote" data-f="swNote" rows="2" placeholder="${C.result === 'fail' ? 'Required: explain the exception or the reason for declining' : 'Optional'}">${esc(S.swNote)}</textarea></div>
       ${C.result === 'fail' ? '<div class="note bad" style="margin-bottom:10px">This swap breaks a rule. You can still approve it as an exception with a note. It is recorded in the audit trail.</div>' : ''}
-      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn bad" data-a="swDecline" data-v="${sw.id}">Decline</button><button class="btn pri" data-a="swApprove" data-v="${sw.id}" data-fail="${C.result === 'fail' ? 1 : ''}">${C.result === 'fail' ? 'Approve as exception' : 'Approve & publish'}</button></div>`
+      ${PEND[sw.id] ? pendBar(sw.id) : ''}<div style="display:${PEND[sw.id] ? 'none' : 'flex'};gap:8px;justify-content:flex-end"><button class="btn bad" data-a="swDecline" data-v="${sw.id}">Decline</button><button class="btn pri" data-a="swApprove" data-v="${sw.id}" data-fail="${C.result === 'fail' ? 1 : ''}">${C.result === 'fail' ? 'Approve as exception' : 'Approve & publish'}</button></div>`
       : sw.status === 'Waiting for coworker' ? `<div class="note">${esc(B.name)} hasn't accepted in Teams yet. ${W.SWAP_RULES.auto ? 'When they do, the system decides automatically.' : 'You can approve once they accept.'}</div><div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn sm" data-a="swAccept" data-v="${sw.id}">Prototype: ${esc(B.name.split(' ')[0])} accepts in Teams</button></div>` : `<div class="note ${sw.status === 'Declined' ? 'bad' : ''}"><b>${sw.auto ? 'Auto-' + sw.status.toLowerCase() : sw.status}</b> by ${esc(sw.decidedBy)} · ${esc(sw.decidedAt)}${sw.decisionNote ? '<br>' + esc(sw.decisionNote) : ''}</div>`}</section>`;
+}
+function swapRulesSummary() {   /* rules live in Tool settings (2026-11-15): changing policy is not part of deciding a swap */
+  const R = W.SWAP_RULES;
+  return `<section class="panel" style="margin-top:6px"><p class="meta" style="margin:0">Auto-approval <b>${R.auto ? 'on' : 'off'}</b> · at least ${R.minRest} h rest · ${R.noticeHours} h notice · up to ${R.maxPerMonth} swaps a month · max ${R.maxDaysWeek} shifts a week. ${isAdmin() ? '<button class="linkbtn" data-a="go" data-v="settings" style="padding:0">Change in Tool settings →</button>' : 'Set by WFM admins in Tool settings.'}</p></section>`;
 }
 function swapRulesPanel() {
   const R = W.SWAP_RULES, ed = isAdmin(), inp = (k, l, min, max) => `<div class="field"><label class="f" for="sr_${k}">${l}</label><input class="in" id="sr_${k}" type="number" min="${min}" max="${max}" value="${R[k]}" data-f="swRule" data-v="${k}" ${ed ? '' : 'disabled'}></div>`;
@@ -5644,8 +5665,9 @@ const A = {
   saveAbs: el => { W.editCell(el.dataset.id, el.dataset.d, { absence:{ reason:$('laR').value, remark:$('laM').value.trim() } }); close(); toast('Absence logged and published to Shifts'); render(); },
   reqTab: el => { S.reqTab = el.dataset.v; S.sel = null; render(); },
   selReq: el => { S.sel = el.dataset.v; S.note = ''; render(); },
-  approve: el => { if (el.dataset.short && !S.note.trim()) { $('decNote').focus(); return toast('Add a note explaining the cover first'); } W.approve(el.dataset.v, S.note.trim()); S.note = ''; toast(W.LIVE.on ? 'Approved · saved · updating Shifts' : 'Approved · sent to Teams · publishing to Shifts'); render(); },
-  deny: el => { if (!S.note.trim()) { $('decNote').focus(); return toast('Add a note for the agent before denying'); } W.deny(el.dataset.v, S.note.trim()); S.note = ''; toast(W.LIVE.on ? 'Denied · saved · updating Shifts' : 'Denied · reply sent in Teams'); render(); },
+  approve: el => { if (el.dataset.short && !S.note.trim()) { $('decNote').focus(); return toast('Add a note explaining the cover first'); } const id = el.dataset.v, note = S.note.trim(); S.note = ''; holdDecision(id, 'Approving', () => { W.approve(id, note); toast(W.LIVE.on ? 'Approved · saved · updating Shifts' : 'Approved · sent to Teams · publishing to Shifts'); }); },
+  deny: el => { if (!S.note.trim()) { $('decNote').focus(); return toast('Add a note for the agent before declining'); } const id = el.dataset.v, note = S.note.trim(); S.note = ''; holdDecision(id, 'Declining', () => { W.deny(id, note); toast(W.LIVE.on ? 'Declined · saved · updating Shifts' : 'Declined · reply sent in Teams'); }); },
+  undoDec: el => undoDecision(el.dataset.v),
   shiftFrom: el => { const v = +el.dataset.v; S.from = v ? addD(S.from, v) : weekStart(TODAY); render(); },
   pickLob: el => { S.lob = el.dataset.v; S.picked.clear(); render(); },
   dayCell: el => dayDetail(el.dataset.k, el.dataset.d),
@@ -5688,8 +5710,8 @@ const A = {
   lgTemplate: () => { const ag = W.AG.slice(0, 3), d = TODAY; W.ui.csv('login-import-template.csv', [['Employee ID','Email','Agent Name','Login','Logout'], ...ag.map(a => { const s = W.sched(a, d); return [a.id, a.email, a.name, d + ' ' + hm((s.working ? s.s : 480) + 3), d + ' ' + hm((s.working ? s.e : 990) - 2)]; })]); toast('Template downloaded'); },
   swTab: el => { S.swTab = el.dataset.v; S.swSel = null; render(); },
   swSel: el => { S.swSel = el.dataset.v; S.swNote = ''; render(); },
-  swApprove: el => { if (el.dataset.fail && !S.swNote.trim()) { $('swNote').focus(); return toast('This swap breaks a rule: add a note to approve it as an exception'); } W.decideSwap(el.dataset.v, true, (el.dataset.fail ? 'Exception: ' : '') + S.swNote.trim()); S.swNote = ''; toast('Swap approved · both schedules updated · publishing to Shifts'); render(); },
-  swDecline: el => { if (!S.swNote.trim()) { $('swNote').focus(); return toast('Add a note for both agents before declining'); } W.decideSwap(el.dataset.v, false, S.swNote.trim()); S.swNote = ''; toast('Swap declined · agents notified in Teams'); render(); },
+  swApprove: el => { if (el.dataset.fail && !S.swNote.trim()) { $('swNote').focus(); return toast('This swap breaks a rule: add a note to approve it as an exception'); } const id = el.dataset.v, note = (el.dataset.fail ? 'Exception: ' : '') + S.swNote.trim(); S.swNote = ''; holdDecision(id, 'Approving swap', () => { W.decideSwap(id, true, note); toast('Swap approved · both schedules updated · publishing to Shifts'); }); },
+  swDecline: el => { if (!S.swNote.trim()) { $('swNote').focus(); return toast('Add a note for both agents before declining'); } const id = el.dataset.v, note = S.swNote.trim(); S.swNote = ''; holdDecision(id, 'Declining swap', () => { W.decideSwap(id, false, note); toast('Swap declined · agents notified in Teams'); }); },
   swBulk: () => { const l = W.SWAPS.filter(x => swOk(x) && !x.teams && x.status === 'Pending approval' && W.swapCheck(x).result === 'pass'); l.forEach(x => W.decideSwap(x.id, true, 'Bulk approval · passes every rule')); toast(`${l.length} swap${l.length === 1 ? '' : 's'} approved`); render(); },
   auWk: el => { S.auWk = +el.dataset.v; S.auPick.clear(); render(); },
   auF: el => { S.auF = el.dataset.v; render(); },
@@ -5932,6 +5954,16 @@ function readRoster(f) {
   rd.readAsArrayBuffer(f);
 }
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target.id === 'lgE' || e.target.id === 'lgP')) A.login(); });
+/* inbox keys: j/k move, a approve, d decline (focuses the note when one is needed), u undo — never while typing */
+document.addEventListener('keydown', e => {
+  if (!S.auth || !['requests','swaps'].includes(S.page) || e.metaKey || e.ctrlKey || e.altKey || e.target.closest('input,textarea,select,[contenteditable]')) return;
+  const k = e.key.toLowerCase(); if (!['j','k','a','d','u'].includes(k)) return;
+  const sw = S.page === 'swaps', selKey = sw ? 'swSel' : 'sel', items = [...document.querySelectorAll(`main [data-a="${sw ? 'swSel' : 'selReq'}"]`)].map(b => b.dataset.v);
+  e.preventDefault();
+  if (k === 'j' || k === 'k') { if (!items.length) return; const i = items.indexOf(S[selKey]); S[selKey] = items[Math.max(0, Math.min(items.length - 1, (i < 0 ? 0 : i + (k === 'j' ? 1 : -1))))]; render(); document.querySelector(`main [data-v="${S[selKey]}"]`)?.scrollIntoView({ block:'nearest' }); return; }
+  if (k === 'u') return undoDecision(S[selKey]);
+  const btn = document.querySelector(`main [data-a="${sw ? (k === 'a' ? 'swApprove' : 'swDecline') : (k === 'a' ? 'approve' : 'deny')}"]`); if (btn && !btn.disabled) btn.click();
+});
 document.addEventListener('keydown', e => { if (!['Enter', ' '].includes(e.key)) return; const el = e.target; if (el && el.matches && el.matches('[role=button][data-a]:not(button):not(a):not(input):not(select)')) { e.preventDefault(); el.click(); } });   // clickable cells work with the keyboard
 setInterval(() => { const f = W.floor; if (f.live && S.auth && ['live','overview'].includes(S.page) && !document.activeElement.matches('input,select,textarea') && !S.spk && !$('drawer').classList.contains('on')) { W.refreshFloor(); render(); } }, 30000);
 W.onChange(() => {
