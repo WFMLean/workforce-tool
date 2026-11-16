@@ -543,7 +543,7 @@ tr.click:hover>td{background:color-mix(in srgb,var(--tintA) 7%,transparent)}
 .trend{outline:none}.trend svg{width:100%}
 .trend .t-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .trend .t-dot,.trend .t-hdot{stroke:var(--solid);stroke-width:2}
-.trend .t-x{stroke:var(--ink3);stroke-width:1}.trend .t-lead{fill:none;stroke-width:1;opacity:.55}
+.trend .t-x{stroke:var(--ink3);stroke-width:1}.trend .t-part{stroke-dasharray:4 4;opacity:.75}.trend .t-open{fill:var(--solid);stroke-width:2}.t-legend .t-leg-h{color:var(--ink3);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em}.trend .t-lead{fill:none;stroke-width:1;opacity:.55}
 .trend .t-tgt-lab{font:600 11px var(--sans);fill:var(--ink2);paint-order:stroke;stroke:var(--solid);stroke-width:4px;stroke-linejoin:round}
 .trend:focus-visible{outline:3px solid var(--acc);outline-offset:4px;border-radius:6px}
 .t-tip{position:absolute;top:6px;min-width:180px;padding:8px 10px;border-radius:8px;background:var(--solid);border:1px solid var(--glass-line);box-shadow:var(--shadow);font-size:12px;color:var(--ink);pointer-events:none;z-index:3}
@@ -3443,21 +3443,26 @@ const TRENDS = {};
 function accTrendChart(rows, weeks) {
   const series = rows.map(r => ({ id:r.acc.id, name:r.acc.name, vals:r.trend.map(v => Number.isFinite(v) ? v : null), target:r.acc.absTarget }));
   if (!series.some(s => s.vals.some(v => v != null))) return '<div class="chart-empty"><b>No absence data for the last 8 weeks</b><span>Absence shows once schedules and leave have loaded for these accounts.</span></div>';
-  TRENDS.acc = { series, weeks };
-  const last = s => { for (let i = s.vals.length - 1; i >= 0; i--) if (s.vals[i] != null) return s.vals[i]; return null; };
+  /* the current week is partial (on a Monday it holds one day, so every line "drops" to ~0%): drawn dashed, and the legend and end labels
+     show the last FULL week */
+  const partial = weeks.length > 1 && weeks[weeks.length - 1] === weekStart(TODAY), full = partial ? weeks.length - 1 : weeks.length;
+  TRENDS.acc = { series, weeks, partial };
+  const last = s => { for (let i = full - 1; i >= 0; i--) if (s.vals[i] != null) return s.vals[i]; return null; };
   const targets = [...new Set(series.map(s => s.target).filter(Number.isFinite))];
   const summary = series.map(s => `${s.name} ${last(s) == null ? 'no data' : fmtPct(last(s))}`).join(', ') + (targets.length === 1 ? `; target ${fmtPct(targets[0])}` : '');
-  return `<div class="t-legend" role="list" aria-label="Accounts, latest week">${series.map(s => `<span role="listitem"><i style="background:var(--acc-${s.id},var(--acc))"></i>${esc(s.name)} <b class="num">${last(s) == null ? '—' : fmtPct(last(s))}</b></span>`).join('')}${targets.length === 1 ? `<span role="listitem" class="t-leg-target"><i></i>Target ${fmtPct(targets[0])}</span>` : ''}</div>
+  return `<div class="t-legend" role="list" aria-label="Accounts, last full week">${partial ? `<span class="t-leg-h">Week of ${fmtS(weeks[full - 1])}</span>` : ''}${series.map(s => `<span role="listitem"><i style="background:var(--acc-${s.id},var(--acc))"></i>${esc(s.name)} <b class="num">${last(s) == null ? '—' : fmtPct(last(s))}</b></span>`).join('')}${targets.length === 1 ? `<span role="listitem" class="t-leg-target"><i></i>Target ${fmtPct(targets[0])}</span>` : ''}</div>
     <div class="trend" data-trend="acc" tabindex="0" role="group" aria-label="Absence by week, last 8 weeks. Latest: ${esc(summary)}. Use the left and right arrow keys to read each week."></div>
     <details class="how t-table"><summary>Show as table</summary><div class="tw"><table><thead><tr><th>Week of</th>${series.map(s => `<th class="n">${esc(s.name)}</th>`).join('')}${targets.length === 1 ? '<th class="n">Target</th>' : ''}</tr></thead><tbody>
-    ${weeks.map((w, i) => `<tr><td>${fmtS(w)}</td>${series.map(s => `<td class="n">${s.vals[i] == null ? '—' : fmtPct(s.vals[i])}</td>`).join('')}${targets.length === 1 ? `<td class="n">${fmtPct(targets[0])}</td>` : ''}</tr>`).join('')}</tbody></table></div></details>`;
+    ${weeks.map((w, i) => `<tr><td>${fmtS(w)}${partial && i === weeks.length - 1 ? ' (so far)' : ''}</td>${series.map(s => `<td class="n">${s.vals[i] == null ? '—' : fmtPct(s.vals[i])}</td>`).join('')}${targets.length === 1 ? `<td class="n">${fmtPct(targets[0])}</td>` : ''}</tr>`).join('')}</tbody></table></div></details>`;
 }
 function drawTrend(el) {
   const T = TRENDS[el.dataset.trend]; if (!T || el.clientWidth < 120) return;   // hidden or mid-resize: keep the last drawing, the observer redraws
-  const { series, weeks } = T, n = weeks.length, Wd = Math.max(280, Math.floor(el.clientWidth)), narrow = Wd < 640, H = narrow ? 220 : 280;
+  const { series, weeks, partial } = T, n = weeks.length, Wd = Math.max(280, Math.floor(el.clientWidth)), narrow = Wd < 640, H = narrow ? 220 : 280;
   const vals = series.flatMap(s => s.vals).filter(v => v != null), targets = [...new Set(series.map(s => s.target).filter(Number.isFinite))];
   const hi = Math.max(...vals, ...targets, 1), step = [1, 2, 5, 10, 20, 25, 50].find(st => Math.ceil(hi * 1.08 / st) <= 5) || 50, top = Math.ceil(hi * 1.08 / step) * step;
   const lastI = s => { for (let i = s.vals.length - 1; i >= 0; i--) if (s.vals[i] != null) return i; return -1; };
+  const fullI = s => { for (let i = (partial ? n - 2 : n - 1); i >= 0; i--) if (s.vals[i] != null) return i; return -1; };
+  /* end labels sit at each line's visual end; with a partial week they carry the name only (the legend, headed by the last full week, has the numbers) */
   const ends = narrow ? [] : series.map(s => ({ s, i:lastI(s) })).filter(e => e.i >= 0).map(e => ({ ...e, v:e.s.vals[e.i] }));
   const labW = ends.length ? Math.min(220, 30 + Math.max(...ends.map(e => (e.s.name.length + 7) * 6.6))) : 0;
   const pl = 42, pr = 12 + labW, pt = 14, pb = 28, iw = Wd - pl - pr, ih = H - pt - pb, inset = 10;
@@ -3465,19 +3470,22 @@ function drawTrend(el) {
   const ticks = []; for (let t = 0; t <= top; t += step) ticks.push(t);
   const every = Math.max(1, Math.ceil(56 / ((iw - 2 * inset) / Math.max(1, n - 1)))), showX = i => i === n - 1 || ((n - 1 - i) % every === 0);
   const col = id => `var(--acc-${id},var(--acc))`;
-  const lines = series.map(s => { const segs = [], g = []; s.vals.forEach((v, i) => { if (v != null) g.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`); else if (g.length) segs.push(g.splice(0)); }); if (g.length) segs.push(g);
-    const li = lastI(s); return segs.map(seg => seg.length > 1 ? `<polyline class="t-line" style="stroke:${col(s.id)}" points="${seg.join(' ')}"/>` : '').join('') + (li >= 0 ? `<circle class="t-dot" cx="${x(li).toFixed(1)}" cy="${y(s.vals[li]).toFixed(1)}" r="4.5" style="fill:${col(s.id)}"/>` : ''); }).join('');
+  const lines = series.map(s => { const upto = partial ? n - 1 : n, segs = [], g = []; s.vals.slice(0, upto).forEach((v, i) => { if (v != null) g.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`); else if (g.length) segs.push(g.splice(0)); }); if (g.length) segs.push(g);
+    const fi = fullI(s), pv = partial ? s.vals[n - 1] : null;
+    return segs.map(seg => seg.length > 1 ? `<polyline class="t-line" style="stroke:${col(s.id)}" points="${seg.join(' ')}"/>` : '').join('')
+      + (partial && pv != null && fi === n - 2 ? `<polyline class="t-line t-part" style="stroke:${col(s.id)}" points="${x(n - 2).toFixed(1)},${y(s.vals[n - 2]).toFixed(1)} ${x(n - 1).toFixed(1)},${y(pv).toFixed(1)}"/><circle class="t-dot t-open" cx="${x(n - 1).toFixed(1)}" cy="${y(pv).toFixed(1)}" r="4" style="stroke:${col(s.id)}"/>` : '')
+      + (fi >= 0 ? `<circle class="t-dot" cx="${x(fi).toFixed(1)}" cy="${y(s.vals[fi]).toFixed(1)}" r="4.5" style="fill:${col(s.id)}"/>` : ''); }).join('');
   ends.sort((a, b) => y(a.v) - y(b.v)).forEach((e, k) => { e.y = y(e.v); e.ly = Math.max(e.y, k ? ends[k - 1].ly + 17 : pt + 6); });
   for (let k = ends.length - 1; k >= 0; k--) ends[k].ly = Math.min(ends[k].ly, k < ends.length - 1 ? ends[k + 1].ly - 17 : pt + ih);
   const tgt = targets.length === 1 ? `<line class="t-target" x1="${pl}" x2="${pl + iw}" y1="${y(targets[0]).toFixed(1)}" y2="${y(targets[0]).toFixed(1)}"/><text class="t-tgt-lab" x="${pl + 6}" y="${(y(targets[0]) - 6).toFixed(1)}">Target ${fmtPct(targets[0])}</text>`
     : targets.map(t => `<line class="t-target" x1="${pl}" x2="${pl + iw}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/>`).join('');
   el.innerHTML = `<svg width="${Wd}" height="${H}" viewBox="0 0 ${Wd} ${H}" aria-hidden="true">
     ${ticks.map(t => `<line class="t-grid" x1="${pl}" x2="${pl + iw}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/><text class="t-axis" x="${pl - 8}" y="${(y(t) + 4).toFixed(1)}" text-anchor="end">${t}%</text>`).join('')}
-    ${weeks.map((w, i) => showX(i) ? `<text class="t-axis" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${fmtS(w)}</text>` : '').join('')}
+    ${weeks.map((w, i) => showX(i) ? `<text class="t-axis" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${partial && i === n - 1 ? 'This week' : fmtS(w)}</text>` : '').join('')}
     ${tgt}<line class="t-x" x1="0" x2="0" y1="${pt}" y2="${pt + ih}" visibility="hidden"/>${lines}<g class="t-hover"></g>
-    ${ends.map(e => `${Math.abs(e.ly - e.y) > 2 ? `<path d="M${(x(e.i) + 7).toFixed(1)} ${e.y.toFixed(1)} L${pl + iw + 8} ${e.ly.toFixed(1)}" class="t-lead" style="stroke:${col(e.s.id)}"/>` : ''}<text class="t-lab" x="${pl + iw + 12}" y="${(e.ly + 4).toFixed(1)}">${esc(e.s.name)} <tspan>${fmtPct(e.v)}</tspan></text>`).join('')}
+    ${ends.map(e => `${Math.abs(e.ly - e.y) > 2 ? `<path d="M${(x(e.i) + 7).toFixed(1)} ${e.y.toFixed(1)} L${pl + iw + 8} ${e.ly.toFixed(1)}" class="t-lead" style="stroke:${col(e.s.id)}"/>` : ''}<text class="t-lab" x="${pl + iw + 12}" y="${(e.ly + 4).toFixed(1)}">${esc(e.s.name)}${partial ? '' : ` <tspan>${fmtPct(e.v)}</tspan>`}</text>`).join('')}
   </svg><div class="t-tip" role="status" aria-live="polite" hidden></div>`;
-  el._g = { x, y, n, pl, iw, inset, series, weeks, targets, Wd };
+  el._g = { x, y, n, pl, iw, inset, series, weeks, targets, Wd, partial };
   if (el._i != null) trendAt(el, el._i);
 }
 /* one hover / keyboard handler for every trend chart on the page */
@@ -3488,7 +3496,7 @@ function trendAt(el, i) {
   cross.setAttribute('x1', X); cross.setAttribute('x2', X); cross.setAttribute('visibility', 'visible');
   const at = g.series.map(s => ({ s, v:s.vals[i] })).filter(r => r.v != null).sort((a, b) => b.v - a.v);
   hov.innerHTML = at.map(r => `<circle class="t-hdot" cx="${X.toFixed(1)}" cy="${g.y(r.v).toFixed(1)}" r="5" style="fill:var(--acc-${r.s.id},var(--acc))"/>`).join('');
-  tip.innerHTML = `<b>Week of ${fmtS(g.weeks[i])}</b>${at.map(r => `<div><span><i style="background:var(--acc-${r.s.id},var(--acc))"></i>${esc(r.s.name)}</span><span class="num">${fmtPct(r.v)}</span></div>`).join('') || '<div>No data this week</div>'}${g.targets.length === 1 ? `<div class="t-tip-tgt"><span>Target</span><span class="num">${fmtPct(g.targets[0])}</span></div>` : ''}`;
+  tip.innerHTML = `<b>Week of ${fmtS(g.weeks[i])}${g.partial && i === g.n - 1 ? ' · so far' : ''}</b>${at.map(r => `<div><span><i style="background:var(--acc-${r.s.id},var(--acc))"></i>${esc(r.s.name)}</span><span class="num">${fmtPct(r.v)}</span></div>`).join('') || '<div>No data this week</div>'}${g.targets.length === 1 ? `<div class="t-tip-tgt"><span>Target</span><span class="num">${fmtPct(g.targets[0])}</span></div>` : ''}`;
   tip.hidden = false; const tw = tip.offsetWidth; tip.style.left = (X + 14 + tw > g.Wd ? Math.max(0, X - 14 - tw) : X + 14) + 'px';
 }
 /* redraw when the chart's own box changes size (window, sidebar rail, zoom); window resize alone missed restores */
