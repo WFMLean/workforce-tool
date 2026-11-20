@@ -2383,21 +2383,25 @@ function rosterView(f = {}) {        // f: {acc, loc, scope(fn), keys:Set|null, 
   const leads = [...new Set(base.flatMap(a => [leadOf(a), supOf(a)]).concat(base.filter(a => !a.rosterRow).map(a => a.tl)).filter(x => x && x !== '—'))].sort();
   return { rows, st, stations: Object.values(byStation).sort((x, y) => x.site.localeCompare(y.site) || y.hc - x.hc), leads };
 }
-/* supervisors per the roster (2026-11-20, JM: "Supervisor should not appear on the abs report"): anyone named in another person's Supervisor
-   column, or whose roster position says Supervisor. Roster names are often shortened ("Sara Nunez" for "Sara Teresa Nuñez Leones"): a
-   shortened name counts only when exactly ONE person's full name holds all its words, so a common short name never hides an agent. */
-function supervisorIds() {
-  const ids = new Set(), names = AG.map(a => ({ a, f:foldN(a.name) })), byName = {}, sups = new Set();
-  names.forEach(x => { (byName[x.f] = byName[x.f] || []).push(x.a); if (/supervisor/i.test(x.a.position || '')) ids.add(x.a.id); });
-  AG.forEach(a => { const n = supRaw(a); if (n && n !== '—') sups.add(foldN(n)); });
-  sups.forEach(sf => { if (!sf) return; if (byName[sf]) return byName[sf].forEach(a => ids.add(a.id)); const w = sf.split(' '); if (w.length < 2) return;
+/* supervisors and team leads per the roster are not agents, so ABS leaves them out (2026-11-20, JM: "Supervisor should not appear on the abs
+   report", then "Leave them [team leads] out too"): anyone named in another person's Supervisor / Team lead column, or whose roster position
+   says supervisor / lead. Roster names are often shortened ("Sara Nunez" for "Sara Teresa Nuñez Leones"): a shortened name counts only when
+   exactly ONE person's full name holds all its words, so a common short name never hides an agent. */
+function rosterNamedIds(nameOf, posRx) {
+  const ids = new Set(), names = AG.map(a => ({ a, f:foldN(a.name) })), byName = {}, named = new Set();
+  names.forEach(x => { (byName[x.f] = byName[x.f] || []).push(x.a); if (posRx.test(x.a.position || '')) ids.add(x.a.id); });
+  AG.forEach(a => { const n = nameOf(a); if (n && n !== '—') named.add(foldN(n)); });
+  named.forEach(nf => { if (!nf) return; if (byName[nf]) return byName[nf].forEach(a => ids.add(a.id)); const w = nf.split(' '); if (w.length < 2) return;
     const hit = names.filter(x => { const aw = x.f.split(' '); return w.every(t => aw.includes(t)); }); if (hit.length === 1) ids.add(hit[0].a.id); });
   return ids;
 }
-const agentsIn = f => { const sup = f.noSup ? supervisorIds() : null;
+const supervisorIds = () => rosterNamedIds(supRaw, /supervisor/i);
+const teamLeadIds = () => rosterNamedIds(leadRaw, /\blead(er)?\b/i);
+function leaderIds() { const ids = supervisorIds(); teamLeadIds().forEach(id => ids.add(id)); return ids; }
+const agentsIn = f => { const sup = f.noSup ? leaderIds() : null;   // noSup: leave supervisors and team leads out
   return AG.filter(a => !a.inactive && (LOCF.v === 'all' || locOf(a) === LOCF.v) && (!f.acc || f.acc === 'all' || a.acc === f.acc) && (!f.lob || f.lob === 'all' || a.key === f.lob) && (!f.keys || f.keys.has(a.key)) && (!sup || !sup.has(a.id))); };
 function absStats(f) {
-  const days = range(f.from, f.to > TODAY ? TODAY : f.to), ags = agentsIn({ ...f, noSup:f.noSup !== false });   // ABS never counts supervisors
+  const days = range(f.from, f.to > TODAY ? TODAY : f.to), ags = agentsIn({ ...f, noSup:f.noSup !== false });   // ABS never counts supervisors or team leads
   const z = () => ({ sched: 0, pl: 0, un: 0, uc: 0, schedM: 0, plM: 0, unM: 0, ucM: 0, partM: 0, partUnknown: 0 });
   const T = { ...z(), outDays: 0 }, byR = {}, byW = {}, byDow = DOW.map(z), byAcc = {}, byLob = {}, byAg = [], byTL = {}, outW = {}, byDay = {};
   const b = (o, k) => o[k] || (o[k] = { k, ...z() });
@@ -2490,7 +2494,7 @@ global.WF = {
   // logic
   get clock() { return WFc.clock; }, set clock(v) { WFc.clock = v; if (WFc.day === TODAY && Math.abs(v - realMin()) > 2) WFc.live = false; emit(); }, realMin,
   get floor() { return { day: WFc.day, clock: WFc.clock, live: WFc.live, zone: WFc.zone }; }, setFloor, lastClockDay,
-  supervisorIds, sched, baseCode, patOn, shiftLabel, shiftShort, ensureTemplate, patternFromAgent, allocation, setAlloc, login, createUser, setUser, resetPw,
+  supervisorIds, teamLeadIds, leaderIds, sched, baseCode, patOn, shiftLabel, shiftShort, ensureTemplate, patternFromAgent, allocation, setAlloc, login, createUser, setUser, resetPw,
   LOCNAME, LOCF, locOf, setLoc: v => { LOCF.v = v; emit(); }, breakPlan, postBreaks, publishDraft, defaultBreaks, breaksOf, paidMin, ARCHIVE, removeAccount, restoreAccount, inactiveFlags, setInactive, clearInactiveShifts, ROSTERS, importRoster, enrichFromRoster, loginKnown, importLogins, importTimesheet, isProjected, rollPreview, runRoll, setPub, tShort, swapVerdict, processSwap, acceptSwap,
   swapMap, swapCheck, decideSwap, setSwapRule, swapDates, swapHolds,
   rcode, fullOff, otMinutes, otIntervals, otStats, setReason, savePatternTimes, scheduleAudit, whatIf, addAccount,
@@ -3261,7 +3265,7 @@ function absRange() {
 }
 function pAbs() {
   const TODAY = repToday();   // the selected account's date
-  const SUP = W.supervisorIds();   // supervisors per the roster are not in the ABS report (2026-11-20)
+  const SUP = W.leaderIds();   // supervisors and team leads per the roster are not in the ABS report (2026-11-20)
   const HN = histNotice(), AR = absRange(), from = AR.from, f = { from, to:TODAY, acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations) }, A = W.absStats(f);
   const tgt = S.acc === 'all' ? weightedAbsTarget(f) : W.ACC[S.acc].absTarget, T = A.T, abs = pct(T.pl + T.un, T.sched);
   const per = AR.per, lobs = Object.values(A.byLob), grain = S.absG === 'month' ? 'month' : 'week';
@@ -3280,7 +3284,7 @@ function pAbs() {
     <div class="seg">${grain === 'month' ? [[1,'This month'],[2,'2 months'],[3,'3 months']].map(([k, t]) => `<button class="${S.absMo === k ? 'on' : ''}" data-a="absMo" data-v="${k}">${t}</button>`).join('') : [4, 8, 12].map(k => `<button class="${S.absW === k ? 'on' : ''}" data-a="absW" data-v="${k}">${k} weeks</button>`).join('')}</div>
     ${stationPick('absence',spkLobs())}
     <button class="btn" data-a="expAbs">Export CSV</button></div>
-  <div class="strip"><div><div class="l">Active people</div><div class="v">${W.AG.filter(a => accOk(a) && !SUP.has(a.id) && reportKeys(UX.absStations).has(a.key)).length}</div><div class="h">Active roster in this selection${(() => { const n = W.AG.filter(a => accOk(a) && SUP.has(a.id) && reportKeys(UX.absStations).has(a.key)).length; return n ? ` · ${n} supervisor${n === 1 ? '' : 's'} left out` : ''; })()}</div></div><div><div class="l">Scheduled shifts</div><div class="v">${T.sched}</div><div class="h">${Hh(T.schedM)} scheduled hours in this period</div></div>
+  <div class="strip"><div><div class="l">Active people</div><div class="v">${W.AG.filter(a => accOk(a) && !SUP.has(a.id) && reportKeys(UX.absStations).has(a.key)).length}</div><div class="h">Active roster in this selection${(() => { const n = W.AG.filter(a => accOk(a) && SUP.has(a.id) && reportKeys(UX.absStations).has(a.key)).length; return n ? ` · ${n} supervisor${n === 1 ? '' : 's'} / team lead${n === 1 ? '' : 's'} left out` : ''; })()}</div></div><div><div class="l">Scheduled shifts</div><div class="v">${T.sched}</div><div class="h">${Hh(T.schedM)} scheduled hours in this period</div></div>
     <div><div class="l">ABS % (hours)</div><div class="v ${tone(absH, tgt, false)}">${fmtPct(absH)}</div><div class="h">Target ${tgt}% · ${absH > tgt ? '+' : ''}${absH == null ? 'No scheduled hours to compare' : ((absH || 0) - tgt).toFixed(1) + ' pts'} · by days ${fmtPct(abs)}</div></div>
     <div><div class="l">Unplanned</div><div class="v warn">${Hh(T.unM)} h</div><div class="h">${fmtPct(pct(T.unM, T.schedM))} · ${T.un} days${T.part ? ` + ${T.part} part days (${Hh(T.partM)} h${T.partUnknown ? `, ${T.partUnknown} with no logins` : ''})` : ''}</div></div>
     <div><div class="l">Planned</div><div class="v">${Hh(T.plM)} h</div><div class="h">${fmtPct(pct(T.plM, T.schedM))} · ${T.pl} days</div></div>
