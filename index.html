@@ -2383,9 +2383,21 @@ function rosterView(f = {}) {        // f: {acc, loc, scope(fn), keys:Set|null, 
   const leads = [...new Set(base.flatMap(a => [leadOf(a), supOf(a)]).concat(base.filter(a => !a.rosterRow).map(a => a.tl)).filter(x => x && x !== '—'))].sort();
   return { rows, st, stations: Object.values(byStation).sort((x, y) => x.site.localeCompare(y.site) || y.hc - x.hc), leads };
 }
-const agentsIn = f => AG.filter(a => !a.inactive && (LOCF.v === 'all' || locOf(a) === LOCF.v) && (!f.acc || f.acc === 'all' || a.acc === f.acc) && (!f.lob || f.lob === 'all' || a.key === f.lob) && (!f.keys || f.keys.has(a.key)));
+/* supervisors per the roster (2026-11-20, JM: "Supervisor should not appear on the abs report"): anyone named in another person's Supervisor
+   column, or whose roster position says Supervisor. Roster names are often shortened ("Sara Nunez" for "Sara Teresa Nuñez Leones"): a
+   shortened name counts only when exactly ONE person's full name holds all its words, so a common short name never hides an agent. */
+function supervisorIds() {
+  const ids = new Set(), names = AG.map(a => ({ a, f:foldN(a.name) })), byName = {}, sups = new Set();
+  names.forEach(x => { (byName[x.f] = byName[x.f] || []).push(x.a); if (/supervisor/i.test(x.a.position || '')) ids.add(x.a.id); });
+  AG.forEach(a => { const n = supRaw(a); if (n && n !== '—') sups.add(foldN(n)); });
+  sups.forEach(sf => { if (!sf) return; if (byName[sf]) return byName[sf].forEach(a => ids.add(a.id)); const w = sf.split(' '); if (w.length < 2) return;
+    const hit = names.filter(x => { const aw = x.f.split(' '); return w.every(t => aw.includes(t)); }); if (hit.length === 1) ids.add(hit[0].a.id); });
+  return ids;
+}
+const agentsIn = f => { const sup = f.noSup ? supervisorIds() : null;
+  return AG.filter(a => !a.inactive && (LOCF.v === 'all' || locOf(a) === LOCF.v) && (!f.acc || f.acc === 'all' || a.acc === f.acc) && (!f.lob || f.lob === 'all' || a.key === f.lob) && (!f.keys || f.keys.has(a.key)) && (!sup || !sup.has(a.id))); };
 function absStats(f) {
-  const days = range(f.from, f.to > TODAY ? TODAY : f.to), ags = agentsIn(f);
+  const days = range(f.from, f.to > TODAY ? TODAY : f.to), ags = agentsIn({ ...f, noSup:f.noSup !== false });   // ABS never counts supervisors
   const z = () => ({ sched: 0, pl: 0, un: 0, uc: 0, schedM: 0, plM: 0, unM: 0, ucM: 0, partM: 0, partUnknown: 0 });
   const T = { ...z(), outDays: 0 }, byR = {}, byW = {}, byDow = DOW.map(z), byAcc = {}, byLob = {}, byAg = [], byTL = {}, outW = {}, byDay = {};
   const b = (o, k) => o[k] || (o[k] = { k, ...z() });
@@ -2478,7 +2490,7 @@ global.WF = {
   // logic
   get clock() { return WFc.clock; }, set clock(v) { WFc.clock = v; if (WFc.day === TODAY && Math.abs(v - realMin()) > 2) WFc.live = false; emit(); }, realMin,
   get floor() { return { day: WFc.day, clock: WFc.clock, live: WFc.live, zone: WFc.zone }; }, setFloor, lastClockDay,
-  sched, baseCode, patOn, shiftLabel, shiftShort, ensureTemplate, patternFromAgent, allocation, setAlloc, login, createUser, setUser, resetPw,
+  supervisorIds, sched, baseCode, patOn, shiftLabel, shiftShort, ensureTemplate, patternFromAgent, allocation, setAlloc, login, createUser, setUser, resetPw,
   LOCNAME, LOCF, locOf, setLoc: v => { LOCF.v = v; emit(); }, breakPlan, postBreaks, publishDraft, defaultBreaks, breaksOf, paidMin, ARCHIVE, removeAccount, restoreAccount, inactiveFlags, setInactive, clearInactiveShifts, ROSTERS, importRoster, enrichFromRoster, loginKnown, importLogins, importTimesheet, isProjected, rollPreview, runRoll, setPub, tShort, swapVerdict, processSwap, acceptSwap,
   swapMap, swapCheck, decideSwap, setSwapRule, swapDates, swapHolds,
   rcode, fullOff, otMinutes, otIntervals, otStats, setReason, savePatternTimes, scheduleAudit, whatIf, addAccount,
@@ -3249,6 +3261,7 @@ function absRange() {
 }
 function pAbs() {
   const TODAY = repToday();   // the selected account's date
+  const SUP = W.supervisorIds();   // supervisors per the roster are not in the ABS report (2026-11-20)
   const HN = histNotice(), AR = absRange(), from = AR.from, f = { from, to:TODAY, acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations) }, A = W.absStats(f);
   const tgt = S.acc === 'all' ? weightedAbsTarget(f) : W.ACC[S.acc].absTarget, T = A.T, abs = pct(T.pl + T.un, T.sched);
   const per = AR.per, lobs = Object.values(A.byLob), grain = S.absG === 'month' ? 'month' : 'week';
@@ -3256,10 +3269,10 @@ function pAbs() {
   const avgUn = pct(T.un, T.sched), Hh = m => Math.round(m / 60).toLocaleString(), absM = T.plM + T.unM + T.ucM, absH = pct(absM, T.schedM), allowM = T.schedM * tgt / 100;
   const P = W.absPatterns({ acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations), min:S.patMin });
   const watch = A.byAg.filter(g => g.un).sort((a, b) => b.bradford - a.bradford || b.un - a.un).slice(0, 15);
-  const accLines = (S.acc === 'all' ? W.ACCOUNTS : [W.ACC[S.acc]]).map((acc, i) => ({ name:acc.name, color:['var(--acc)','#f5b84a','#b98cff','#4fd1a5','#ff8a80','#7aa7ff'][i % 6], pts:per.map(pp => { let s = 0, ab = 0; W.AG.filter(a => a.acc === acc.id && (S.absLob === 'all' || a.key === S.absLob) && reportKeys(UX.absStations).has(a.key)).forEach(a => range(pp.s, pp.e).forEach(d => { if (d > TODAY) return; const sc = W.sched(a, d); if (!sc.working) return; s++; if (sc.absence) ab++; })); return [pp.s, pct(ab, s)]; }) }));
+  const accLines = (S.acc === 'all' ? W.ACCOUNTS : [W.ACC[S.acc]]).map(acc => ({ id:acc.id, name:acc.name, target:acc.absTarget, pts:per.map(pp => { let s = 0, ab = 0; W.AG.filter(a => a.acc === acc.id && !SUP.has(a.id) && (S.absLob === 'all' || a.key === S.absLob) && reportKeys(UX.absStations).has(a.key)).forEach(a => range(pp.s, pp.e).forEach(d => { if (d > TODAY) return; const sc = W.sched(a, d); if (!sc.working) return; s++; if (sc.absence) ab++; })); return [pp.s, pct(ab, s)]; }) }));
   const shade = (v, t) => v == null ? '' : `background:color-mix(in srgb,${v > t * 1.25 ? 'var(--bad) 42%' : v > t ? 'var(--warn) 32%' : 'var(--ok) 22%'},transparent)`;
   /* late arrivals per period: days with a late first login ÷ scheduled days that have login data (adh() skips days with no upload) */
-  const LF = { acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations) }, lastE = per[per.length - 1].e, ALL = adhCached({ ...LF, from, to:lastE }), LT = adhSplit(ALL, per), LA = (lastE < W.TODAY ? lastE : W.TODAY) === (TODAY < W.TODAY ? TODAY : W.TODAY) ? ALL : adhCached({ ...LF, from, to:TODAY });
+  const LF = { acc:S.acc, lob:S.absLob, keys:reportKeys(UX.absStations), noSup:true }, lastE = per[per.length - 1].e, ALL = adhCached({ ...LF, from, to:lastE }), LT = adhSplit(ALL, per), LA = (lastE < W.TODAY ? lastE : W.TODAY) === (TODAY < W.TODAY ? TODAY : W.TODAY) ? ALL : adhCached({ ...LF, from, to:TODAY });
   const lateCell = o => !o || !o.days ? '<td class="n meta">—</td>' : `<td class="n">${fmtPct(pct(o.late, o.days))}<div class="meta">${o.late} late${o.late ? ' · ' + Math.round(o.lateMin / o.late) + ' min avg' : ''}</div></td>`;
   const lateLobs = [...new Set(LT.flatMap(x => Object.keys(x.byLob)))].sort(), lateTop = LA.byAg.filter(g => g.late).sort((x, y) => y.late - x.late || y.lateMin - x.lateMin).slice(0, 15);
   return HN + `<div class="head"><div class="grow"><div class="kicker">${fmtD(from)} – ${fmtD(TODAY)} · full-day absences on scheduled days</div><h1><b>Absence report</b> analysis</h1><p class="sub">ABS % = absent scheduled hours ÷ scheduled hours, from each person's real shift length. Part days (Late in, Early out) count the hours actually lost, from the logins. Planned = booked in advance. Unplanned = call-outs, emergencies and no-shows. A reason that isn't on the approved list is <b>unclassified</b>, never guessed.</p></div>
@@ -3267,7 +3280,7 @@ function pAbs() {
     <div class="seg">${grain === 'month' ? [[1,'This month'],[2,'2 months'],[3,'3 months']].map(([k, t]) => `<button class="${S.absMo === k ? 'on' : ''}" data-a="absMo" data-v="${k}">${t}</button>`).join('') : [4, 8, 12].map(k => `<button class="${S.absW === k ? 'on' : ''}" data-a="absW" data-v="${k}">${k} weeks</button>`).join('')}</div>
     ${stationPick('absence',spkLobs())}
     <button class="btn" data-a="expAbs">Export CSV</button></div>
-  <div class="strip"><div><div class="l">Active people</div><div class="v">${W.AG.filter(a => accOk(a) && reportKeys(UX.absStations).has(a.key)).length}</div><div class="h">Active roster in this selection</div></div><div><div class="l">Scheduled shifts</div><div class="v">${T.sched}</div><div class="h">${Hh(T.schedM)} scheduled hours in this period</div></div>
+  <div class="strip"><div><div class="l">Active people</div><div class="v">${W.AG.filter(a => accOk(a) && !SUP.has(a.id) && reportKeys(UX.absStations).has(a.key)).length}</div><div class="h">Active roster in this selection${(() => { const n = W.AG.filter(a => accOk(a) && SUP.has(a.id) && reportKeys(UX.absStations).has(a.key)).length; return n ? ` · ${n} supervisor${n === 1 ? '' : 's'} left out` : ''; })()}</div></div><div><div class="l">Scheduled shifts</div><div class="v">${T.sched}</div><div class="h">${Hh(T.schedM)} scheduled hours in this period</div></div>
     <div><div class="l">ABS % (hours)</div><div class="v ${tone(absH, tgt, false)}">${fmtPct(absH)}</div><div class="h">Target ${tgt}% · ${absH > tgt ? '+' : ''}${absH == null ? 'No scheduled hours to compare' : ((absH || 0) - tgt).toFixed(1) + ' pts'} · by days ${fmtPct(abs)}</div></div>
     <div><div class="l">Unplanned</div><div class="v warn">${Hh(T.unM)} h</div><div class="h">${fmtPct(pct(T.unM, T.schedM))} · ${T.un} days${T.part ? ` + ${T.part} part days (${Hh(T.partM)} h${T.partUnknown ? `, ${T.partUnknown} with no logins` : ''})` : ''}</div></div>
     <div><div class="l">Planned</div><div class="v">${Hh(T.plM)} h</div><div class="h">${fmtPct(pct(T.plM, T.schedM))} · ${T.pl} days</div></div>
@@ -3277,7 +3290,7 @@ function pAbs() {
   <section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>ABS % by ${grain} and line of business</h2><p class="sub">Green = within target · amber = above target · red = more than 25% above target${AR.partial ? ` · * Teams history starts ${fmtD(AR.covFrom)}, so the first ${grain} is partial` : ''}</p></div></div>
     <div class="tw tall"><table><thead><tr><th>Account · LOB</th>${per.map(pp => `<th class="n">${esc(pp.label)}</th>`).join('')}<th class="n">Period</th><th class="n">Unpl.</th><th>vs target</th></tr></thead><tbody>
     ${lobs.map(l => { const t = W.ACC[l.k.split('|')[0]].absTarget, p = pct(l.pl + l.un, l.sched);
-      const wk = per.map(pp => { let s = 0, ab = 0; W.AG.filter(a => a.key === l.k).forEach(a => range(pp.s, pp.e).forEach(d => { if (d > TODAY) return; const sc = W.sched(a, d); if (!sc.working) return; s++; if (sc.absence) ab++; })); return pct(ab, s); });
+      const wk = per.map(pp => { let s = 0, ab = 0; W.AG.filter(a => a.key === l.k && !SUP.has(a.id)).forEach(a => range(pp.s, pp.e).forEach(d => { if (d > TODAY) return; const sc = W.sched(a, d); if (!sc.working) return; s++; if (sc.absence) ab++; })); return pct(ab, s); });
       return `<tr><td class="nm">${esc(lobName(l.k))}</td>${wk.map(v => `<td class="n" style="${shade(v, t)}">${fmtPct(v)}</td>`).join('')}<td class="n"><b>${fmtPct(p)}</b></td><td class="n">${fmtPct(pct(l.un, l.sched))}</td><td>${vsTarget(p, t, false)}</td></tr>`; }).join('')}
     </tbody></table></div></section>
   <section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>Late arrivals by ${grain} and line of business</h2><p class="sub">Late % = scheduled days with a late first login ÷ scheduled days that have login data. Late follows the tardiness rule (${esc(W.lateRuleText())}). Each cell shows late %, late days and average minutes late. — = no login data uploaded for that period.</p></div></div>
@@ -3288,7 +3301,9 @@ function pAbs() {
     ${lateTop.length ? `<h3 style="margin:14px 0 8px">Most late days · ${fmtD(from)} – ${fmtD(TODAY)}</h3><div class="tw" style="max-height:360px"><table><thead><tr><th>Agent</th><th>Station</th><th>Team lead</th><th class="n">Late days</th><th class="n">Days with data</th><th class="n">Late %</th><th class="n">Avg min late</th><th class="n">Total min late</th></tr></thead><tbody>
       ${lateTop.map(g => `<tr><td class="nm">${esc(g.a.name)}</td><td>${esc(lobName(g.a.key))}</td><td>${esc(g.a.tl || '—')}</td><td class="n">${g.late}</td><td class="n">${g.days}</td><td class="n">${fmtPct(pct(g.late, g.days))}</td><td class="n">${Math.round(g.lateMin / g.late)}</td><td class="n">${g.lateMin}</td></tr>`).join('')}</tbody></table></div>` : ''}</section>
   <div class="cols c2" style="margin-bottom:14px">
-    <section class="panel"><h2 style="margin-bottom:8px">${grain === 'month' ? 'Monthly' : 'Weekly'} ABS % by account</h2>${lineChart(accLines, tgt, 0, Math.max(14, ...accLines.flatMap(l => l.pts.map(p => p[1] || 0))) )}</section>
+    <section class="panel"><h2>${grain === 'month' ? 'Monthly' : 'Weekly'} ABS % by account</h2><p class="sub" style="margin-bottom:6px">Point at the chart (or use the arrow keys) to read a ${grain}.</p>${trendChart('abs', accLines.map(l => ({ id:l.id, name:l.name, target:l.target, vals:l.pts.map(p => Number.isFinite(p[1]) ? p[1] : null) })), per.map(pp => pp.s),
+      { partial:per.length > 1 && per[per.length - 1].e >= TODAY, unit:grain, labels:per.map(pp => pp.label.replace(/ \(MTD\)$/, '')), title:`${grain === 'month' ? 'Monthly' : 'Weekly'} ABS % by account`,
+        empty:'<div class="chart-empty"><b>No absence data in this period</b><span>Absence shows once schedules and leave have loaded.</span></div>' })}</section>
     <section class="panel"><h2 style="margin-bottom:8px">Most common absence reasons</h2><table><thead><tr><th>Reason</th><th>Type</th><th class="n">Days</th><th class="n">Share</th><th class="n">Running share</th><th style="width:28%"></th></tr></thead><tbody>
       ${rs.map(([k, v]) => { cum += v; return `<tr><td>${abTag(k)} ${esc(k)}</td><td class="meta">${W.RTYPE[k]}</td><td class="n">${v}</td><td class="n">${fmtPct(pct(v, totAbs), 0)}</td><td class="n">${fmtPct(pct(cum, totAbs), 0)}</td><td><div class="bar"><b class="${W.RTYPE[k] === 'unplanned' ? 'un' : ''}" style="width:${pct(v, rs[0][1])}%"></b></div></td></tr>`; }).join('')}</tbody></table></section></div>
   <div class="cols c2" style="margin-bottom:14px">
@@ -3442,18 +3457,25 @@ const chartW = (share = 1, lo = 560, hi = 1700) => { const m = typeof document !
 const TRENDS = {};
 function accTrendChart(rows, weeks) {
   const series = rows.map(r => ({ id:r.acc.id, name:r.acc.name, vals:r.trend.map(v => Number.isFinite(v) ? v : null), target:r.acc.absTarget }));
-  if (!series.some(s => s.vals.some(v => v != null))) return '<div class="chart-empty"><b>No absence data for the last 8 weeks</b><span>Absence shows once schedules and leave have loaded for these accounts.</span></div>';
-  /* the current week is partial (on a Monday it holds one day, so every line "drops" to ~0%): drawn dashed, and the legend and end labels
-     show the last FULL week */
-  const partial = weeks.length > 1 && weeks[weeks.length - 1] === weekStart(TODAY), full = partial ? weeks.length - 1 : weeks.length;
-  TRENDS.acc = { series, weeks, partial };
+  return trendChart('acc', series, weeks, { partial:weeks.length > 1 && weeks[weeks.length - 1] === weekStart(TODAY), title:'Absence by week, last 8 weeks',
+    empty:'<div class="chart-empty"><b>No absence data for the last 8 weeks</b><span>Absence shows once schedules and leave have loaded for these accounts.</span></div>' });
+}
+/* shared account trend chart (Account summary, Absence report): key = TRENDS slot; series [{id, name, vals, target}]; weeks = period starts;
+   o.labels = axis/tooltip labels (default: the week date), o.unit 'week' | 'month', o.partial = the last period is still running */
+const trendLab = (T, i) => T.labels ? T.labels[i] : fmtS(T.weeks[i]), trendHead = (T, i) => T.unit === 'month' ? trendLab(T, i) : 'Week of ' + trendLab(T, i);
+function trendChart(key, series, weeks, o = {}) {
+  if (!series.some(s => s.vals.some(v => v != null))) return o.empty || '';
+  /* the current period is partial (on a Monday the week holds one day, so every line "drops" to ~0%): drawn dashed, and the legend and end
+     labels show the last FULL period */
+  const partial = !!o.partial && weeks.length > 1, full = partial ? weeks.length - 1 : weeks.length;
+  const T = TRENDS[key] = { series, weeks, partial, labels:o.labels || null, unit:o.unit || 'week' };
   const last = s => { for (let i = full - 1; i >= 0; i--) if (s.vals[i] != null) return s.vals[i]; return null; };
   const targets = [...new Set(series.map(s => s.target).filter(Number.isFinite))];
   const summary = series.map(s => `${s.name} ${last(s) == null ? 'no data' : fmtPct(last(s))}`).join(', ') + (targets.length === 1 ? `; target ${fmtPct(targets[0])}` : '');
-  return `<div class="t-legend" role="list" aria-label="Accounts, last full week">${partial ? `<span class="t-leg-h">Week of ${fmtS(weeks[full - 1])}</span>` : ''}${series.map(s => `<span role="listitem"><i style="background:var(--acc-${s.id},var(--acc))"></i>${esc(s.name)} <b class="num">${last(s) == null ? '—' : fmtPct(last(s))}</b></span>`).join('')}${targets.length === 1 ? `<span role="listitem" class="t-leg-target"><i></i>Target ${fmtPct(targets[0])}</span>` : ''}</div>
-    <div class="trend" data-trend="acc" tabindex="0" role="group" aria-label="Absence by week, last 8 weeks. Latest: ${esc(summary)}. Use the left and right arrow keys to read each week."></div>
-    <details class="how t-table"><summary>Show as table</summary><div class="tw"><table><thead><tr><th>Week of</th>${series.map(s => `<th class="n">${esc(s.name)}</th>`).join('')}${targets.length === 1 ? '<th class="n">Target</th>' : ''}</tr></thead><tbody>
-    ${weeks.map((w, i) => `<tr><td>${fmtS(w)}${partial && i === weeks.length - 1 ? ' (so far)' : ''}</td>${series.map(s => `<td class="n">${s.vals[i] == null ? '—' : fmtPct(s.vals[i])}</td>`).join('')}${targets.length === 1 ? `<td class="n">${fmtPct(targets[0])}</td>` : ''}</tr>`).join('')}</tbody></table></div></details>`;
+  return `<div class="t-legend" role="list" aria-label="Accounts, last full ${T.unit}">${partial ? `<span class="t-leg-h">${trendHead(T, full - 1)}</span>` : ''}${series.map(s => `<span role="listitem"><i style="background:var(--acc-${s.id},var(--acc))"></i>${esc(s.name)} <b class="num">${last(s) == null ? '—' : fmtPct(last(s))}</b></span>`).join('')}${targets.length === 1 ? `<span role="listitem" class="t-leg-target"><i></i>Target ${fmtPct(targets[0])}</span>` : ''}</div>
+    <div class="trend" data-trend="${key}" tabindex="0" role="group" aria-label="${esc(o.title || 'Trend')}. Latest: ${esc(summary)}. Use the left and right arrow keys to read each ${T.unit}."></div>
+    <details class="how t-table"><summary>Show as table</summary><div class="tw"><table><thead><tr><th>${T.unit === 'month' ? 'Month' : 'Week of'}</th>${series.map(s => `<th class="n">${esc(s.name)}</th>`).join('')}${targets.length === 1 ? '<th class="n">Target</th>' : ''}</tr></thead><tbody>
+    ${weeks.map((w, i) => `<tr><td>${trendLab(T, i)}${partial && i === weeks.length - 1 ? ' (so far)' : ''}</td>${series.map(s => `<td class="n">${s.vals[i] == null ? '—' : fmtPct(s.vals[i])}</td>`).join('')}${targets.length === 1 ? `<td class="n">${fmtPct(targets[0])}</td>` : ''}</tr>`).join('')}</tbody></table></div></details>`;
 }
 function drawTrend(el) {
   const T = TRENDS[el.dataset.trend]; if (!T || el.clientWidth < 120) return;   // hidden or mid-resize: keep the last drawing, the observer redraws
@@ -3481,11 +3503,11 @@ function drawTrend(el) {
     : targets.map(t => `<line class="t-target" x1="${pl}" x2="${pl + iw}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/>`).join('');
   el.innerHTML = `<svg width="${Wd}" height="${H}" viewBox="0 0 ${Wd} ${H}" aria-hidden="true">
     ${ticks.map(t => `<line class="t-grid" x1="${pl}" x2="${pl + iw}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/><text class="t-axis" x="${pl - 8}" y="${(y(t) + 4).toFixed(1)}" text-anchor="end">${t}%</text>`).join('')}
-    ${weeks.map((w, i) => showX(i) ? `<text class="t-axis" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${partial && i === n - 1 ? 'This week' : fmtS(w)}</text>` : '').join('')}
+    ${weeks.map((w, i) => showX(i) ? `<text class="t-axis" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${partial && i === n - 1 ? (T.unit === 'month' ? 'This month' : 'This week') : trendLab(T, i)}</text>` : '').join('')}
     ${tgt}<line class="t-x" x1="0" x2="0" y1="${pt}" y2="${pt + ih}" visibility="hidden"/>${lines}<g class="t-hover"></g>
     ${ends.map(e => `${Math.abs(e.ly - e.y) > 2 ? `<path d="M${(x(e.i) + 7).toFixed(1)} ${e.y.toFixed(1)} L${pl + iw + 8} ${e.ly.toFixed(1)}" class="t-lead" style="stroke:${col(e.s.id)}"/>` : ''}<text class="t-lab" x="${pl + iw + 12}" y="${(e.ly + 4).toFixed(1)}">${esc(e.s.name)}${partial ? '' : ` <tspan>${fmtPct(e.v)}</tspan>`}</text>`).join('')}
   </svg><div class="t-tip" role="status" aria-live="polite" hidden></div>`;
-  el._g = { x, y, n, pl, iw, inset, series, weeks, targets, Wd, partial };
+  el._g = { x, y, n, pl, iw, inset, series, weeks, targets, Wd, partial, T };
   if (el._i != null) trendAt(el, el._i);
 }
 /* one hover / keyboard handler for every trend chart on the page */
@@ -3496,7 +3518,7 @@ function trendAt(el, i) {
   cross.setAttribute('x1', X); cross.setAttribute('x2', X); cross.setAttribute('visibility', 'visible');
   const at = g.series.map(s => ({ s, v:s.vals[i] })).filter(r => r.v != null).sort((a, b) => b.v - a.v);
   hov.innerHTML = at.map(r => `<circle class="t-hdot" cx="${X.toFixed(1)}" cy="${g.y(r.v).toFixed(1)}" r="5" style="fill:var(--acc-${r.s.id},var(--acc))"/>`).join('');
-  tip.innerHTML = `<b>Week of ${fmtS(g.weeks[i])}${g.partial && i === g.n - 1 ? ' · so far' : ''}</b>${at.map(r => `<div><span><i style="background:var(--acc-${r.s.id},var(--acc))"></i>${esc(r.s.name)}</span><span class="num">${fmtPct(r.v)}</span></div>`).join('') || '<div>No data this week</div>'}${g.targets.length === 1 ? `<div class="t-tip-tgt"><span>Target</span><span class="num">${fmtPct(g.targets[0])}</span></div>` : ''}`;
+  tip.innerHTML = `<b>${trendHead(g.T, i)}${g.partial && i === g.n - 1 ? ' · so far' : ''}</b>${at.map(r => `<div><span><i style="background:var(--acc-${r.s.id},var(--acc))"></i>${esc(r.s.name)}</span><span class="num">${fmtPct(r.v)}</span></div>`).join('') || '<div>No data this week</div>'}${g.targets.length === 1 ? `<div class="t-tip-tgt"><span>Target</span><span class="num">${fmtPct(g.targets[0])}</span></div>` : ''}`;
   tip.hidden = false; const tw = tip.offsetWidth; tip.style.left = (X + 14 + tw > g.Wd ? Math.max(0, X - 14 - tw) : X + 14) + 'px';
 }
 /* redraw when the chart's own box changes size (window, sidebar rail, zoom); window resize alone missed restores */
