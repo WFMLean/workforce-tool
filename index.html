@@ -600,6 +600,9 @@ td.iss .pill{white-space:normal;margin:1px 0}
 .strip .l{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3}
 .tw.tall{max-height:560px;overflow:auto}
 .tm-send{margin-top:4px}
+.sw{display:inline-flex;align-items:center;gap:6px;cursor:pointer}.sw input{width:34px;height:18px;appearance:none;-webkit-appearance:none;border-radius:99px;background:var(--line2);position:relative;cursor:pointer;margin:0;transition:background .15s}.sw input::after{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--ink);transition:transform .15s}.sw input:checked{background:var(--ok)}.sw input:checked::after{transform:translateX(16px);background:#fff}.sw input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}.sw input:disabled{opacity:.5;cursor:not-allowed}
+.acc-setup td{vertical-align:middle}.acc-setup .seg button:disabled{opacity:.45;cursor:not-allowed}
+.na-steps{margin-bottom:14px;background:var(--glass-hi)}.na-progress{display:flex;flex-wrap:wrap;gap:6px 18px;list-style:none;margin:0 0 12px;padding:0;font-size:12.5px;color:var(--ink3);font-weight:600}.na-progress .on{color:var(--ink)}.na-progress .done{color:var(--ok)}.na-progress .done::before{content:'✓ '}
 details.how{margin:0 0 10px}details.how>summary{cursor:pointer;color:var(--ink3);font-size:12.5px;font-weight:600}details.how>summary:hover{color:var(--ink)}details.how p{margin:6px 0 0}
 .side .foot{background:color-mix(in srgb,var(--ground) 94%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--glass-line);margin-top:auto;z-index:2}
 .pendbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--tintA) 45%,transparent);background:color-mix(in srgb,var(--tintA) 12%,var(--glass))}
@@ -3094,10 +3097,10 @@ function scheduleDetail(id,d) {
 let scheduleReadBusy=false;
 /* Refresh from Teams: asks the server to read the account in view (All accounts = every account in scope). The server reads ONE account
    at a time (2026-11-16: five reads at once = 40 reader calls together, every one 504), so the rest wait in its queue a minute or so each. */
-async function refreshScheduleReads() {
+async function refreshScheduleReads(only) {
  if(scheduleReadBusy||!DB.on||!S.auth)return;
  scheduleReadBusy=true;render();
- try{const accs=W.LIVE.accs.filter(inScope).filter(a=>S.acc==='all'||a===S.acc),res=await Promise.all(accs.map(a=>dbFeedNow(a).then(r=>[a,r]))),nm=st=>res.filter(x=>x[1]===st).map(x=>W.ACC[x[0]].name);
+ try{const accs=only?[only]:W.LIVE.accs.filter(inScope).filter(a=>S.acc==='all'||a===S.acc),res=await Promise.all(accs.map(a=>dbFeedNow(a).then(r=>[a,r]))),nm=st=>res.filter(x=>x[1]===st).map(x=>W.ACC[x[0]].name);
   const started=nm('started'),queued=nm('queued'),busy=nm('busy'),bad=res.filter(x=>!['started','queued','busy'].includes(x[1]));
   toast(started.length||queued.length?[started.length?'Reading '+started.join(', ')+' now':'',queued.length?(started.length?'then ':'Queued: ')+queued.join(', ')+' (the server reads one account at a time, under a minute each)':''].filter(Boolean).join(' · ')+' · this page updates by itself'
    :busy.length?`${busy.join(', ')} ${busy.length===1?'was':'were'} read in the last 2 minutes · the newest read shows here automatically`:'Refresh not available: '+(bad[0]?bad[0][1]:'no accounts'));
@@ -4118,6 +4121,43 @@ function accountsTab() {
 }
 /* Add an account from Teams Shifts (live, 2026-11-13): paste the team link → Check team (read through the Shifts reader) → Add account
    saves it in wft_accounts, adds it to the reader list (publishing stays off) and sets its time zone. Nothing is hard-coded any more. */
+/* Accounts setup (2026-11-27, JM: "make the live set up easier and user friendly"): everything an account needs to go live, in one row:
+   its Shifts team, time zone, Reading on/off, Sending Off / Preview / Live and the last read with a refresh. Each control saves at once
+   (read-then-write of the shared setting, so two admins never undo each other). Links, database, per-site team mapping and per-station
+   sending scope moved under "rarely changed". */
+function accountsSetupPanel(ed) {
+  const dis = ed ? '' : 'disabled', T = DB.teams || {};
+  const status = (a, x, t) => !x.team ? '<span class="pill bad"><i></i>No Shifts team</span>' : !x.read ? '<span class="pill muted"><i></i>Not reading</span>'
+    : t.feedOk === false ? '<span class="pill warn"><i></i>Last read failed</span>' : x.mode === 'live' ? '<span class="pill ok"><i></i>Live</span>'
+    : x.mode === 'preview' ? '<span class="pill info"><i></i>Preview · nothing sent</span>' : '<span class="pill info"><i></i>Reading only</span>';
+  const rows = W.ACCOUNTS.map(a => { const x = sendState(a.id), t = T[a.id] || {}, z = W.zoneOf(a.id);
+    return `<tr><td class="nm">${esc(a.name)}<div class="meta">${t.people != null ? t.people + ' people' : t.st === 'loading' ? 'Loading…' : ''}</div></td>
+      <td>${esc(a.team || '—')}</td>
+      <td><select class="in" data-f="accTz" data-v="${a.id}" aria-label="${esc(a.name)} time zone" ${dis}>${W.TZ_CHOICES.map(([k, l]) => `<option value="${k}" ${k === z ? 'selected' : ''}>${esc(l.replace(/ ·.*/, ''))}</option>`).join('')}</select></td>
+      <td>${!CONN.standalone && a.id === 'CRN' ? '<span class="meta" title="Crane is read through the portal feed in this set-up">Portal feed</span>' : `<label class="sw"><input type="checkbox" data-f="accRead" data-v="${a.id}" ${x.read ? 'checked' : ''} ${dis} aria-label="Read ${esc(a.name)} from Shifts"><span>${x.read ? 'On' : 'Off'}</span></label>`}</td>
+      <td><div class="seg" role="group" aria-label="Sending for ${esc(a.name)}">${[['off','Off'],['preview','Preview'],['live','Live']].map(([k, l]) => `<button class="${x.mode === k ? 'on' : ''}" data-a="accSend" data-v="${a.id}" data-m="${k}" ${!ed || (k !== 'off' && (!x.read || !x.team)) ? 'disabled' : ''} ${x.mode === k ? 'aria-pressed="true"' : ''}>${l}</button>`).join('')}</div></td>
+      <td class="nowrap">${t.feedAt ? feedAge(t.feedAt) : x.read ? 'Not read yet' : '—'} <button class="btn sm ghost" data-a="accReadNow" data-v="${a.id}" ${x.read && !scheduleReadBusy ? '' : 'disabled'} aria-label="Read ${esc(a.name)} from Teams now" title="Read from Teams now">↻</button></td>
+      <td>${status(a, x, t)}</td></tr>`; }).join('');
+  return `<section class="panel" style="margin-bottom:14px"><div class="panel-h"><div class="grow"><h2>Accounts</h2><p class="sub">Everything an account needs to go live. Changes save at once for everyone. <b>Reading</b> brings its schedules into the tool; <b>Sending</b> controls what goes back to Shifts: Off, Preview (shows what would be sent, sends nothing) or Live.</p></div>
+      ${ed ? `<button class="btn pri" data-a="naOpen" aria-expanded="${S.naOpen ? 'true' : 'false'}">${S.naOpen ? 'Close' : '+ Add account'}</button>` : ''}</div>
+    ${S.naOpen && ed ? addAccountSteps() : ''}
+    <div class="tw"><table class="acc-setup"><thead><tr><th>Account</th><th>Shifts team</th><th>Time zone</th><th>Reading</th><th>Sending to Shifts</th><th>Last read</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="foot-note">Time zone must match the Shifts team's own setting (Shifts → Settings → Team time zone). Sending can be switched on once the account is read and has a Shifts team. Stations or people limits for sending, and a different Shifts team per site or station, are under "Connection links, database and sending scope" below.</p></section>`;
+}
+/* Add account, guided: 1 find the team (paste its link, the tool checks it in Shifts) → 2 name, location, time zone → 3 added: reading on,
+   first read queued, sending off until someone switches it on */
+function addAccountSteps() {
+  const n = S.na || {}, v = k => esc(n[k] || ''), found = n.check && n.check.ok, step = found ? 2 : 1;
+  return `<div class="na-steps panel">
+    <ol class="na-progress" aria-label="Add account steps"><li class="${step === 1 ? 'on' : 'done'}">1 · Find the Shifts team</li><li class="${step === 2 ? 'on' : ''}">2 · Name and time zone</li><li>3 · Reading starts</li></ol>
+    <div class="field"><label class="f" for="naLink">Team link</label><div style="display:flex;gap:8px;flex-wrap:wrap"><input class="in mono" id="naLink" data-na="link" style="flex:1;min-width:260px" placeholder="Paste the link: Teams → the team → ⋯ → Get link to team" value="${v('link')}"><button class="btn ${found ? '' : 'pri'}" data-a="naCheck" ${n.busy ? 'disabled' : ''}>${n.busy ? 'Checking…' : 'Check team'}</button></div></div>
+    ${n.check ? `<div class="note ${n.check.ok ? '' : 'bad'}" role="status" style="margin-bottom:10px">${esc(n.check.msg)}</div>` : ''}
+    ${found ? `<div class="cols c2"><div class="field"><label class="f" for="naName">Account name (as people know it)</label><input class="in" id="naName" data-na="name" placeholder="e.g. Acme Logistics" value="${v('name')}"></div>
+      <div class="field"><label class="f" for="naTz">Shifts team time zone</label><select class="in" id="naTz" data-na="tz" style="width:100%">${W.TZ_CHOICES.map(([z, l]) => `<option value="${z}" ${(n.tz || 'America/Bogota') === z ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div></div>
+      <div class="field" style="max-width:340px"><label class="f" for="naSite">Main location</label><select class="in" id="naSite" data-na="site" style="width:100%">${Object.entries(W.LOCNAME).map(([k, l]) => `<option value="${k}" ${(n.site || 'BAQ') === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center"><span class="meta">Sending to Shifts stays off until you switch it on in the table.</span><button class="btn pri" data-a="naAdd" ${n.busy ? 'disabled' : ''}>Add account and start reading</button></div>` : ''}
+  </div>`;
+}
 function addAccountForm(ed) {
   if (!ed) return '';
   const n = S.na || {}, v = k => esc(n[k] || '');
@@ -4304,8 +4344,19 @@ async function dbSetReading(id, on) {
   P.read = on ? [...new Set([...(P.read || []), id])] : (P.read || []).filter(x => x !== id);
   if (!on) P.accounts = (P.accounts || []).filter(x => x !== id);
   if (on && W.ACC[id]) P.site = { ...(P.site || {}), [id]:W.LOCNAME[W.ACC[id].site] || W.ACC[id].site };
-  const { error } = await DB.sb.from('wft_settings').upsert({ key:'pilot', value:P, updated_by:W.ME.name, updated_at:new Date().toISOString() }); if (error) throw error;
-  CONN.pilot = P;
+  const at = new Date().toISOString(), { error } = await DB.sb.from('wft_settings').upsert({ key:'pilot', value:P, updated_by:W.ME.name, updated_at:at }); if (error) throw error;
+  CONN.pilot = P; CONN.pilotAt = at; S.pil = null;
+}
+/* sending per account: 'off' | 'preview' | 'live' (stored as accounts[] + mode{} = 'dry' | 'live'; station/people scope is kept) */
+async function dbSetSending(id, m) {
+  if (!DB.on) { const P = { ...pilotCfg(), ...(CONN.pilot || {}), read:readAccs() }; P.accounts = m === 'off' ? P.accounts.filter(x => x !== id) : [...new Set([...P.accounts, id])]; P.mode = { ...(P.mode || {}), [id]:m === 'live' ? 'live' : 'dry' }; CONN.pilot = P; S.pil = null; return; }
+  const cur = await DB.sb.from('wft_settings').select('value').eq('key', 'pilot').maybeSingle(); if (cur.error) throw cur.error;
+  const P = { ...((cur.data && cur.data.value) || {}) };
+  P.accounts = m === 'off' ? (P.accounts || []).filter(x => x !== id) : [...new Set([...(P.accounts || []), id])];
+  if (m !== 'off') P.mode = { ...(P.mode || {}), [id]:m === 'live' ? 'live' : 'dry' };
+  const at = new Date().toISOString(), { error } = await DB.sb.from('wft_settings').upsert({ key:'pilot', value:P, updated_by:W.ME.name, updated_at:at }); if (error) throw error;
+  CONN.pilot = P; CONN.pilotAt = at; S.pil = null;
+  W.audit('Settings', 'Sending to Shifts changed', W.ACC[id] ? W.ACC[id].name : id, '', m === 'off' ? 'Off' : m === 'live' ? 'Live' : 'Preview', 'Connected services → Accounts');
 }
 async function dbArchiveAccount(id, archived) {
   if (!DB.on || !isAdmin()) return;
@@ -4919,6 +4970,8 @@ function pConnect() {
   const C = CONN, ed = isAdmin(), dt = C.dbTest, ft = C.flowTest;
   return `<div class="head"><div class="grow"><div class="kicker">Where the data comes from and where it goes</div><h1><b>Connections</b></h1><p class="sub">Same set-up as your live PTO portal: one Supabase database plus Power Automate flows into and out of Microsoft Shifts and Teams. Values are saved in this browser; the database key is the public (anon) key, and access is protected by database rules, not by hiding it.</p></div></div>
   ${connStatusPanel()}
+  ${accountsSetupPanel(ed)}
+  <details class="adv" ${S.connAdv ? 'open' : ''} ontoggle="S.connAdv = this.open"><summary>Connection links, database and sending scope (rarely changed)</summary>
   <div class="cols c2">
     ${C.standalone ? `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">The Shifts reader below reads team members, schedules, time off and time-off requests. The tool reads when you sign in; schedules and requests refresh every minute while their page is open.</p></div></div><p class="note">Use <b>Refresh Teams requests</b> on Review leave requests for an immediate check. Its status shows the last request read or an error. Shift swap requests are not connected yet.</p><button class="btn" data-a="reqRefresh" ${scheduleReadBusy ? 'disabled' : ''}>Refresh Teams requests</button></section>` : `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div class="grow"><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">Flow <b>“Crane Shifts → PTO sync”</b> runs by itself every hour. It reads Shifts and writes into the database; the tool reads the database.</p></div>${dt && dt.sync ? `<span class="pill ok"><i></i>Last sync ${esc(dt.sync.split(' · ')[0])}</span>` : '<span class="pill muted">Last sync: test the database</span>'}</div>
       <div class="note" style="margin-bottom:10px"><b>No link is needed here for the hourly sync.</b> The link goes the other way, inside the flow: its HTTP step posts to the database address below, with the anon key in the headers (as the live portal does today).</div>
@@ -4960,6 +5013,7 @@ ${DB.on ? '' : '<div class="note warn" style="margin-bottom:10px"><b>Local test 
       <p class="foot-note">New accounts appear here after being added, but must be selected and configured before any live sending. Selected accounts are read from and published to Shifts in their account time zone (Settings → Account time zones). Everything else stays "Not sent" until it's ticked here. Use the v2 publish flow: it replaces overnight shifts and duplicates correctly.</p></div>
     <div style="display:flex;justify-content:flex-end"><button class="btn pri" data-a="cPilotSave">Save</button></div></section>` : ''}
   ${teamMapPanel(ed)}
+  </details>
   <details class="adv"><summary>Advanced setup · diagram, snapshot, backup, exports, attendance files, flow reference</summary>
   <section class="panel" style="margin-bottom:14px">${flowDiagram()}</section>
   ${DB.on?`<section class="panel"><h2>Shared Teams snapshot</h2><p>${DB.cacheError?'Snapshot unavailable: '+esc(DB.cacheError)+'. Apply teams-cache-setup.sql in this Workforce Tool project.':DB.cacheSavedAt?'Last saved '+esc(new Date(DB.cacheSavedAt).toLocaleString()):'Waiting for the first complete Teams read.'}</p><p class="meta">Schedules, native activities, rest/leave, members, groups, reason definitions and received requests are cached by account. Saved tool edits and clock-ins load separately. Refresh failures retain the snapshot with its capture time.</p></section>`:''}
@@ -5665,6 +5719,11 @@ const A = {
     W.removeAccount(a.id, $('arWhy').value.trim()); dbArchiveAccount(a.id, true); if (S.acc === a.id) S.acc = 'all'; close(); toast(`${a.name} removed · archived, can be restored`); render(); },
   clockOpen: () => open('Display clock', timeZonePanel(), '<button class="btn pri" data-a="close">Done</button>'),
   accRestore: el => { W.restoreAccount(el.dataset.v); dbArchiveAccount(el.dataset.v, false); toast(`${W.ACC[el.dataset.v].name} restored`); render(); },
+  naOpen: () => { S.naOpen = !S.naOpen; if (!S.naOpen) S.na = null; render(); if (S.naOpen) setTimeout(() => $('naLink') && $('naLink').focus(), 30); },
+  accReadNow: el => refreshScheduleReads(el.dataset.v),
+  accSend: async el => { const id = el.dataset.v, m = el.dataset.m, a = W.ACC[id]; if (!a || !isAdmin()) return; if (sendState(id).mode === m) return;
+    if (m === 'live' && !confirm(`Send ${a.name}'s schedule changes and leave decisions to its Shifts team "${a.team}"?\n\nFrom now on, publishing in the tool changes real shifts in Microsoft Shifts for this account.`)) return;
+    try { await dbSetSending(id, m); toast(`${a.name}: sending to Shifts ${m === 'off' ? 'off' : m === 'live' ? 'LIVE' : 'in preview (nothing is sent)'}${DB.on ? '' : ' · local test mode, not saved'}`); } catch (e) { toast('Not saved: ' + e.message); } render(); },
   naCheck: async () => { const n = S.na = { ...(S.na || {}) }, id = W.parseTeamId(n.link || '');
     const say = (ok, msg) => { S.na = { ...S.na, busy:false, check:{ ok, msg } }; render(); };
     if (!id) return say(false, 'That isn\'t a team link or ID. In Teams: open the team → ⋯ → Get link to team, then paste it here.');
@@ -5684,7 +5743,7 @@ const A = {
     try { const { error } = await DB.sb.from('wft_accounts').insert({ id, name, site:n.site || 'BAQ', team_name:name, team_id:n.teamId, abs_target:7, adh_target:95 }); if (error) throw error;
       W.addAccount({ id, name, site:n.site || 'BAQ', team:name, teamId:n.teamId, lobs:[], absTarget:7, adhTarget:95 });
       W.setAccTz(id, n.tz || 'America/Bogota'); await dbSaveAccTz(); await dbSetReading(id, true);
-      S.na = null; toast(`${name} added · reading its Shifts team now`); render(); dbLoadTeams({ scope:[id] });
+      S.na = null; S.naOpen = false; toast(`${name} added · its first read is queued (about a minute) · switch on sending in the table when the schedules look right`); render(); dbFeedNow(id).finally(() => setTimeout(() => dbLoadTeams({ scope:[id] }), 45000));
     } catch (e) { S.na = { ...n, busy:false, check:{ ok:false, msg:'Not saved: ' + (e.message || e) } }; render(); } },
   pickLoc: el => { S.loc = el.dataset.v; W.setLoc(S.loc); render(); scrollTo(0, 0); },
   accGo: el => { S.acc = el.dataset.v; S.page = 'live'; render(); scrollTo(0, 0); },
@@ -5974,6 +6033,13 @@ document.addEventListener('change', e => { const k = e.target.dataset.f, v = e.t
   if (k === 'adhLob') S.adhLob = v; else if (k === 'absLob') S.absLob = v; else if (k === 'audMod') { S.aud.mod = v; S.aud.page = 0; } else if (k === 'audUser') { S.aud.user = v; S.aud.page = 0; }
   else if (k === 'loc') { S.loc = v; W.setLoc(v); S.adhLob = 'all'; S.absLob = 'all'; }
   else if (k === 'accSel') { A.acc({ dataset:{ v } }); return; }
+  else if (k === 'accRead') { const id = e.target.dataset.v, on = e.target.checked, a = W.ACC[id]; if (!isAdmin() || !a) return;
+    if (!on && sendState(id).mode !== 'off' && !confirm(`Stop reading ${a.name}? Sending to Shifts is switched off too.`)) { e.target.checked = true; return; }
+    (DB.on ? dbSetReading(id, on) : Promise.resolve((() => { const P = { ...pilotCfg(), read:on ? [...new Set([...readAccs(), id])] : readAccs().filter(x => x !== id) }; if (!on) P.accounts = (P.accounts || []).filter(x => x !== id); CONN.pilot = P; S.pil = null; })()))
+      .then(() => { toast(`${a.name}: reading ${on ? 'on · first read queued' : 'off'}${DB.on ? '' : ' · local test mode, not saved'}`); if (on && DB.on) { dbFeedNow(id); setTimeout(() => dbLoadTeams({ scope:[id] }), 45000); } render(); }, err => { toast('Not saved: ' + err.message); render(); }); return; }
+  else if (k === 'accTz') { const id = e.target.dataset.v, a = W.ACC[id], before = W.zoneOf(id); if (!isAdmin() || !a) return;
+    if (!confirm(`Change ${a.name}'s time zone to ${(W.TZ_CHOICES.find(z => z[0] === v) || [v, v])[1]}?\n\nIt must match the Shifts team's own time zone. Shifts already sent keep their old times until they are published again.`)) { e.target.value = before; return; }
+    W.setAccTz(id, v); dbSaveAccTz(); render(); return; }
   else if (k === 'spk' || k === 'spkLoc') { spkChange(k, e.target); return; }
   else if (k === 'swp') { bSwapRead(); $('drB').innerHTML = bSwapBody(); return; }
   else if (k === 'accTz') { if (!isAdmin()) return; W.setAccTz(e.target.dataset.k, v); dbSaveAccTz(); }
