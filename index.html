@@ -464,6 +464,7 @@ h1,.drawer header h2{font-family:var(--sans);letter-spacing:-.025em}h1{font-size
 @property --tintB{syntax:'<color>';inherits:true;initial-value:#7a5cff}
 :root{
   --acc-CRN:#3987e5; --acc-ONT:#d95926; --acc-RIV:#199e70; --acc-NBQ:#c98500; --acc-NBG:#d55181;   /* validated set, dark (dataviz check 2026-11-16) */
+  --acc-HGL:#0ca30c; --acc-ACW:#9085e9; --acc-ACM:#e66767; --acc-ACE:#8a9bb5; --acc-ACA:#6c7d97;   /* 2026-11-27: slots 6–8 of the same order; ACE/ACA past the 8 validated hues → neutral greys */
   --tintA:#3987e5; --tintB:#6a5ae0; --ground:#050a16;
   --glass:rgba(17,27,50,.58); --glass2:rgba(24,37,66,.66); --glass-hi:rgba(255,255,255,.055);
   --glass-line:rgba(170,195,255,.13); --glass-edge:rgba(255,255,255,.10); --th-bg:rgba(11,19,37,.86);
@@ -472,12 +473,13 @@ h1,.drawer header h2{font-family:var(--sans);letter-spacing:-.025em}h1{font-size
   --line:rgba(170,195,255,.10); --line2:rgba(170,195,255,.18); --ink3:#8a9bb5;
   transition:--tintA .6s cubic-bezier(.2,.7,.2,1),--tintB .6s cubic-bezier(.2,.7,.2,1);
 }
-:root[data-theme="light"]{--acc-CRN:#2a78d6;--acc-ONT:#eb6834;--acc-RIV:#1baf7a;--acc-NBQ:#eda100;--acc-NBG:#e87ba4}   /* validated set, light */
+:root[data-theme="light"]{--acc-CRN:#2a78d6;--acc-ONT:#eb6834;--acc-RIV:#1baf7a;--acc-NBQ:#eda100;--acc-NBG:#e87ba4;--acc-HGL:#008300;--acc-ACW:#6250d6;--acc-ACM:#e34948;--acc-ACE:#53627a;--acc-ACA:#7b8aa3}   /* validated set, light */
 :root[data-acc="CRN"]{--tintA:var(--acc-CRN);--tintB:#1c5cab}
 :root[data-acc="ONT"]{--tintA:var(--acc-ONT);--tintB:#a8421b}
 :root[data-acc="RIV"]{--tintA:var(--acc-RIV);--tintB:#13705a}
 :root[data-acc="NBQ"]{--tintA:var(--acc-NBQ);--tintB:#8c6200}
 :root[data-acc="NBG"]{--tintA:var(--acc-NBG);--tintB:#9b3560}
+:root[data-acc="HGL"]{--tintA:var(--acc-HGL);--tintB:#0b6b2e}:root[data-acc="ACW"]{--tintA:var(--acc-ACW);--tintB:#4f3fb0}:root[data-acc="ACM"]{--tintA:var(--acc-ACM);--tintB:#9c2f37}:root[data-acc="ACE"],:root[data-acc="ACA"]{--tintA:#5b6f90;--tintB:#3a4a66}
 :root[data-theme="light"]{
   --ground:#e9eef8; --glass:rgba(255,255,255,.64); --glass2:rgba(255,255,255,.78); --glass-hi:rgba(255,255,255,.5);
   --glass-line:rgba(30,55,100,.11); --glass-edge:rgba(255,255,255,.9); --th-bg:rgba(246,248,253,.92);
@@ -582,7 +584,7 @@ input[type=date]:focus,input[type=time]:focus{outline:2px solid color-mix(in srg
 .accsel .adot{position:absolute;left:11px;width:9px;height:9px;border-radius:50%;background:var(--c);pointer-events:none;box-shadow:0 0 0 1px var(--glass-line)}
 .accsel select{min-width:210px;min-height:34px;padding-left:28px;font-weight:600;background:color-mix(in srgb,var(--tintA) 16%,var(--glass));border-color:color-mix(in srgb,var(--tintA) 45%,transparent)}
 .clockpill{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:10px;border:1px solid var(--glass-line);background:var(--glass-hi);color:var(--ink);font:600 12.5px var(--sans);font-variant-numeric:tabular-nums;white-space:nowrap;cursor:pointer}
-.clockpill:hover{background:color-mix(in srgb,var(--ink) 8%,transparent)}
+.clockpill:hover{background:color-mix(in srgb,var(--ink) 8%,transparent)}.clockpill.warn{border-color:color-mix(in srgb,var(--warn) 55%,transparent);color:var(--warn)}.clockpill:disabled{opacity:.7;cursor:progress}
 .floorq h2{font-size:18px;display:flex;align-items:center;gap:10px}.floorq .qn{display:inline-grid;place-items:center;min-width:34px;height:34px;padding:0 8px;border-radius:10px;font-size:18px;font-variant-numeric:tabular-nums}
 .floorq .qn.bad{background:color-mix(in srgb,var(--bad) 22%,transparent);color:var(--bad)}.floorq .qn.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
 a.btn{text-decoration:none}
@@ -2835,7 +2837,7 @@ function shell() {
     <div>
       <div class="top"><label class="accsel" title="Account"><span class="adot" style="--c:${S.acc === 'all' ? 'transparent' : 'var(--acc-' + S.acc + ',var(--acc))'}" aria-hidden="true"></span><select class="in" data-f="accSel" aria-label="Account">${chips.map(([k, l]) => `<option value="${k}" ${S.acc === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
         <select class="in" data-f="loc" aria-label="Location" style="width:auto;min-height:30px;padding:3px 8px"><option value="all">All locations</option>${locList().map(x => `<option ${S.loc === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
-        <button class="clockpill" data-a="clockOpen" title="Account time · change the display clock" aria-label="Account time ${esc(floorClockText())}. Change the display clock"><span aria-hidden="true">◷</span> ${esc(floorClockText())}</button>
+        <button class="clockpill" data-a="clockOpen" title="Account time · change the display clock" aria-label="Account time ${esc(floorClockText())}. Change the display clock"><span aria-hidden="true">◷</span> ${esc(floorClockText())}</button>${DB.on ? shiftsReadPill() : ''}
         <button class="srch" data-a="cmdOpen" aria-label="Search people and pages"><span>⌕</span><span class="t">Search people & pages</span></button>
         <span class="sp"></span><span id="syncPill">${syncPill()}</span>
         <button class="btn sm" data-a="pageHelp" aria-label="Help with this page"><span class="hl">Help with this page</span><span class="hs">Help</span></button><button class="btn sm ghost" data-a="theme" aria-label="Switch theme">◐</button>
@@ -3063,16 +3065,24 @@ function pSchedule() {
     <div class="legend"><span><span class="sc sc-D" style="opacity:.55;outline:1.5px dashed var(--ink3)">8–16:30</span> projected (auto-roll)</span><span>${abTag('Vacation')} planned</span><span>${abTag('Medical leave')} unplanned</span><span>Codes follow the Team Shift exemptions</span></div></section>`;
 }
 /* the tool reads Shifts only through the server feed: show when the server last read each account, and anything older than 30 min */
+/* top bar: when Teams Shifts was last read for the accounts in view; one click asks the server to read again (2026-11-27: reads happen
+   only on request, to save flow runs) */
+function shiftsReadPill() {
+  const ts = W.ACCOUNTS.filter(a => inScope(a.id) && (S.acc === 'all' || a.id === S.acc)).map(a => (DB.teams || {})[a.id] || {});
+  const at = ts.map(t => t.feedAt).filter(Boolean).sort()[0], failed = ts.some(t => t.feedAt && t.feedOk === false);
+  const lbl = scheduleReadBusy ? 'Reading Teams…' : at ? 'Shifts ' + feedAge(at) : 'Shifts not read';
+  return `<button class="clockpill${failed ? ' warn' : ''}" data-a="scheduleRefresh" ${scheduleReadBusy ? 'disabled' : ''} title="Teams Shifts is read only when someone asks. Click to read ${S.acc === 'all' ? 'every account in view' : esc(W.ACC[S.acc].name)} now (one account at a time, under a minute each)." aria-label="${esc(lbl)}. Refresh from Teams"><span aria-hidden="true">↻</span> ${esc(lbl)}</button>`;
+}
 const feedAge = t => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000)); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : durL(m) + ' ago'; };
 function scheduleReadStatus() {
  const accs=W.ACCOUNTS.filter(a=>inScope(a.id)&&(S.acc==='all'||a.id===S.acc));
  const st=accs.map(a=>({a,t:(DB.teams||{})[a.id]||{},pend:((W.SCHK[a.id]||{}).rows||[]).filter(r=>r.side!=='shifts').length}));
  const rev=x=>x.pend?` · <b>${x.pend} to review</b>`:'',old=x=>x.t.feedAt&&Date.now()-Date.parse(x.t.feedAt)>30*60000;
- const ok=st.filter(x=>x.t.feedAt&&x.t.feedOk&&!old(x)),late=st.filter(x=>x.t.feedAt&&(!x.t.feedOk||old(x))),none=st.filter(x=>!x.t.feedAt);
- const mode=DB.on?'Teams Shifts is read by the server every 15 min':'Sample data';
+ const ok=st.filter(x=>x.t.feedAt&&x.t.feedOk),late=st.filter(x=>x.t.feedAt&&!x.t.feedOk),none=st.filter(x=>!x.t.feedAt);
+ const mode=DB.on?'Teams Shifts is read when someone presses Refresh from Teams':'Sample data';
  return `<section class="srcbar" title="The saved original schedule is kept separately. Unsent tool changes are never overwritten by a Teams read."><span><b>Current schedule</b> · ${mode}</span>`
   +(DB.on&&ok.length?`<span>Read: ${ok.map(x=>`${esc(x.a.name)} ${feedAge(x.t.feedAt)}${rev(x)}`).join(', ')}</span>`:'')
-  +late.map(x=>`<span><span class="pill warn">${x.t.feedOk?'Older than 30 min':'Last read failed'}</span> ${esc(x.a.name)}: showing the read from ${feedAge(x.t.feedAt)}${x.t.feedErr?' · '+esc(x.t.feedErr):''}${rev(x)}</span>`).join('')
+  +late.map(x=>`<span><span class="pill warn">Last read failed</span> ${esc(x.a.name)}: showing the read from ${feedAge(x.t.feedAt)}${x.t.feedErr?' · '+esc(x.t.feedErr):''}${rev(x)}</span>`).join('')
   +(DB.on&&none.length?`<span>Not read yet: ${none.map(x=>esc(x.a.name)).join(', ')}</span>`:'')
   +`<span class="sp"></span>${DB.on?'':'<span class="meta">Refresh works with live data only</span>'}<button class="btn sm" data-a="scheduleRefresh" ${DB.on&&!scheduleReadBusy?'':'disabled'}>${scheduleReadBusy?'Reading Teams…':'Refresh from Teams'}</button></section>`;
 }
@@ -3091,7 +3101,7 @@ async function refreshScheduleReads() {
   const started=nm('started'),queued=nm('queued'),busy=nm('busy'),bad=res.filter(x=>!['started','queued','busy'].includes(x[1]));
   toast(started.length||queued.length?[started.length?'Reading '+started.join(', ')+' now':'',queued.length?(started.length?'then ':'Queued: ')+queued.join(', ')+' (the server reads one account at a time, under a minute each)':''].filter(Boolean).join(' · ')+' · this page updates by itself'
    :busy.length?`${busy.join(', ')} ${busy.length===1?'was':'were'} read in the last 2 minutes · the newest read shows here automatically`:'Refresh not available: '+(bad[0]?bad[0][1]:'no accounts'));
-  for(const wait of [20,20,20,30,30,40,40,40]){await new Promise(r=>setTimeout(r,wait*1000));await feedPoll();}
+  for(const wait of [20,20,20,30,30,40,40,40,60,60,60]){await new Promise(r=>setTimeout(r,wait*1000));await feedPoll();}
  }finally{scheduleReadBusy=false;render();}
 }
 /* 'live' (Who is working now + call-outs) too: time off entered in Shifts during the day shows there without a reload (2026-11-05) */
@@ -4699,7 +4709,8 @@ async function dbRestoreTeam(acc,J,P){
  return changes;
 }
 const histNotice=()=>{const cw=Object.entries(DB.clockWarn||{}).filter(([a])=>S.acc==='all'||S.acc===a).map(([a,w])=>`<p class="note warn"><b>${esc(W.ACC[a].name)}:</b> some clock-ins could not be loaded (${esc(w)}). Those days show no login data, not no-shows.</p>`).join('');const hw=cw+Object.entries(DB.histWarn||{}).filter(([a])=>S.acc==='all'||S.acc===a).map(([a,w])=>`<p class="note warn"><b>${esc(W.ACC[a].name)}:</b> schedule change history could not be loaded (${esc(w)}). Schedules and reports are shown; the saved original schedule and the Schedule changes history are hidden until the database clean-up.</p>`).join('');const l=Object.entries(DB.teams||{}).filter(([a,x])=>x.hist&&x.hist!=='ok'&&(S.acc==='all'||S.acc===a));return hw+(l.length?`<p class="note">${l.map(([a,x])=>esc(W.ACC[a].name)+(x.hist==='failed'?' older weeks failed to load ('+esc(x.histWhy||'')+')':' older weeks still loading from Teams')).join(' · ')}. The last 2 weeks and the next 5 are complete; weeks before that fill in automatically.</p>`:'');};
-/* 2026-11-16: Supabase is the tool's only Shifts reader. The server (shifts-feed) reads each account every 15 min, 7 days back → 36 ahead,
+/* 2026-11-16: Supabase is the tool's only Shifts reader. The server (shifts-feed) reads an account when someone presses Refresh from Teams
+   (2026-11-27: on request only, to save flow runs; before that every 15 min), 7 days back → 36 ahead,
    plus requests and swaps; the tool loads its saved 12-week snapshot + that feed and never calls the reader to load or check schedules.
    Each feed is merged into the snapshot and saved again, so history builds up. Refresh from Teams asks the server to read now. */
 const FEED_SEEN = {}; DB.lastJ = DB.lastJ || {};
@@ -4722,7 +4733,7 @@ async function dbLoadTeams(p) {
    const [cached,feed]=await Promise.all([TEAM_CACHE_ON?DB.sb.from('wft_team_cache').select('payload,captured_at,version').eq('account_id',acc).maybeSingle():Promise.resolve({data:null}),feedRow(acc,true).catch(e=>{console.warn('shifts feed',e.message);return null;})]);
    if(cached.error)DB.cacheError=cached.error.message;else if(cached.data)cached.data.payload=await unpackTeamCache(cached.data.payload);
    const base=cached.data&&cached.data.version===1&&Array.isArray(cached.data.payload?.shifts)?cached.data.payload:null,F=feed&&feed.payload&&Array.isArray(feed.payload.shifts)?feed.payload:null;
-   if(!base&&!F){DB.teams[acc]={st:'failed',why:'No Shifts data in Supabase yet. The server reads each account every 15 minutes; a read was requested.'};dbFeedNow(acc);return;}
+   if(!base&&!F){DB.teams[acc]={st:'failed',why:'No Shifts data in Supabase yet. A read was requested; it shows here in about a minute.'};dbFeedNow(acc);return;}
    const J=feedJ(base,F),changes=await dbRestoreTeam(acc,J,P),L=W.LIVE.teams[acc]||{};
    DB.lastJ[acc]=J;FEED_SEEN[acc]=feed&&feed.read_at;
    DB.teams[acc]={st:'ok',loaded:true,people:L.people,shifts:L.shifts,stations:(L.stations||[]).length,secs:Math.round((Date.now()-started)/1000),hist:'ok',
@@ -4896,7 +4907,7 @@ function connStatusPanel() {
   const rows = [
     ['Database', DB.on ? 'ok' : 'bad', DB.on ? 'Signed in to the Workforce Tool database.' : 'Not connected. Sign in again; if it persists, check the database link below.'],
     ['Shifts reader link (used by the server)', !C.readUrl ? 'bad' : failRead.length ? 'bad' : 'ok', !C.readUrl ? 'No reader link. Paste it in Receiving from Shifts below.' : `${accs.length} account${accs.length === 1 ? '' : 's'} read from Shifts${okRead.length < accs.length ? ` · ${okRead.length} loaded so far` : ''}${failRead.length ? ' · failed: ' + failRead.map(a => W.ACC[a].name + ' (' + ((T[a] || {}).why || '') + ')').join(', ') : ''}.`],
-    ['Server reads Shifts (every 15 min)', DB.feedRows === undefined ? 'warn' : !feed.length ? 'warn' : feed.some(f => !f.ok) || fresh.length < feed.length || feedMissing.length ? 'warn' : 'ok',
+    ['Server reads Shifts (on Refresh from Teams)', DB.feedRows === undefined ? 'warn' : !feed.length ? 'warn' : feed.some(f => !f.ok) || feedMissing.length ? 'warn' : 'ok',
       DB.feedRows === undefined ? 'Checking…' : DB.feedErr ? 'Not readable: ' + DB.feedErr : feed.map(f => `${(W.ACC[f.account_id] || { name:f.account_id }).name} ${f.ok ? ago(f.read_at) : 'failed: ' + (f.error || '')}`).join(' · ') + (feedMissing.length ? ' · not read yet: ' + feedMissing.map(a => W.ACC[a].name).join(', ') + ' (new accounts join the next round)' : '')],
     ['Publishing to Shifts', !C.pubUrl ? 'bad' : (P.accounts || []).some(a => W.ACC[a] && !sendState(a).team) ? 'warn' : (P.accounts || []).length ? 'ok' : 'off', !C.pubUrl ? 'No publishing link. Paste it in Sending to Shifts below.' : (P.accounts || []).length ? 'Publishes for ' + P.accounts.filter(a => W.ACC[a]).map(a => { const x = sendState(a); return W.ACC[a].name + (!x.team ? ' (no Shifts team)' : x.mode === 'preview' ? ' (preview only)' : ''); }).join(', ') + '.' + (W.ACCOUNTS.some(a => !P.accounts.includes(a.id)) ? ' Not sending: ' + W.ACCOUNTS.filter(a => !P.accounts.includes(a.id)).map(a => a.name).join(', ') + '.' : '') : 'Link set, but no account publishes yet. Tick accounts in the controls below.'],
     ['Time off to Shifts (PTO flow)', C.flowUrl ? 'ok' : 'warn', C.flowUrl ? 'Approved leave is sent to Shifts.' : 'No PTO flow link: leave stays in the tool only.'],
