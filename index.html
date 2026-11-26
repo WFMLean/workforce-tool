@@ -3091,7 +3091,7 @@ function shiftsReadPill() {
   const ts = W.ACCOUNTS.filter(a => inScope(a.id) && (S.acc === 'all' || a.id === S.acc)).map(a => (DB.teams || {})[a.id] || {});
   const at = ts.map(t => t.feedAt).filter(Boolean).sort()[0], failed = ts.some(t => t.feedOk === false);
   const lbl = scheduleReadBusy ? 'Reading Teams…' : failed ? 'Shifts refresh failed' : at ? 'Shifts ' + feedAge(at) : ts.some(t => t.st === 'loading') ? 'Shifts loading…' : 'Shifts not read';
-  return `<button class="clockpill${failed ? ' warn' : ''}" data-a="scheduleRefresh" ${scheduleReadBusy ? 'disabled' : ''} title="Teams Shifts is read only when someone asks. Click to read ${S.acc === 'all' ? 'every account in view' : esc(W.ACC[S.acc].name)} now (one account at a time, under a minute each)." aria-label="${esc(lbl)}. Refresh from Teams"><span aria-hidden="true">↻</span> ${esc(lbl)}</button>`;
+  return `<button class="clockpill${failed ? ' warn' : ''}" data-a="scheduleRefresh" ${scheduleReadBusy ? 'disabled' : ''} title="Teams Shifts is read only when someone asks. Click to read ${S.acc === 'all' ? 'every account in view' : esc(W.ACC[S.acc].name)} now (one team at a time; combined accounts can take several minutes)." aria-label="${esc(lbl)}. Refresh from Teams"><span aria-hidden="true">↻</span> ${esc(lbl)}</button>`;
 }
 const feedAge = t => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000)); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : durL(m) + ' ago'; };
 function scheduleReadStatus() {
@@ -3119,7 +3119,7 @@ async function refreshScheduleReads(only) {
  scheduleReadBusy=true;render();
  try{const accs=(only?[only]:readAccs().filter(inScope).filter(a=>S.acc==='all'||a===S.acc)).filter(a=>readAccs().includes(a)&&inScope(a)),before=Object.fromEntries(await Promise.all(accs.map(async a=>[a,await feedRow(a,false).catch(()=>null)]))),res=await Promise.all(accs.map(a=>dbFeedNow(a).then(r=>[a,r]))),nm=st=>res.filter(x=>x[1]===st).map(x=>W.ACC[x[0]].name);
   const started=nm('started'),queued=nm('queued'),busy=nm('busy'),bad=res.filter(x=>!['started','queued','busy'].includes(x[1]));
-  toast(started.length||queued.length?[started.length?'Reading '+started.join(', ')+' now':'',queued.length?(started.length?'then ':'Queued: ')+queued.join(', ')+' (the server reads one account at a time, under a minute each)':''].filter(Boolean).join(' · ')+' · this page updates by itself'
+  toast(started.length||queued.length?[started.length?'Reading '+started.join(', ')+' now':'',queued.length?(started.length?'then ':'Queued: ')+queued.join(', ')+' (the server reads one team at a time; combined accounts can take several minutes)':''].filter(Boolean).join(' · ')+' · this page updates by itself'
    :busy.length?`${busy.join(', ')} ${busy.length===1?'was':'were'} read in the last 2 minutes · the newest read shows here automatically`:'Refresh not available: '+(bad[0]?bad[0][1]:'no accounts'));
   const pending=new Set(res.filter(([,r])=>['started','queued','busy'].includes(r)).map(([a])=>a));
   for(const wait of [5,10,15,20,20,30,30,40,40,60,60,60,60]){if(!pending.size)break;await new Promise(r=>setTimeout(r,wait*1000));await feedPoll([...pending]);
@@ -4518,7 +4518,7 @@ function dbSaveFailed(error, label) {
 }
 function dbSaveOk() { if (DB.offline || DB.errShown) toast('Connection back · all changes saved'); DB.err = ''; DB.offline = false; DB.errShown = false; DB.retry = 0; dbKeepOutbox(); }
 async function dbFlushDays() {
-  if (!DB.on || !DB.peopleOk || !DB.dayQ.length || DB.dayBusy) return; DB.dayBusy = true; const b = DB.dayQ.slice(0, 500);
+  if (!DB.on || !DB.peopleOk || !DB.dayQ.length || DB.dayBusy) return; const newest=new Map();for(const row of DB.dayQ){const k=row.person_id+'|'+row.d,old=newest.get(k);if(!old||String(row.updated_at||'')>=String(old.updated_at||''))newest.set(k,row);}DB.dayQ=[...newest.values()]; DB.dayBusy = true; const b = DB.dayQ.slice(0, 500);
   const { error } = await DB.sb.from('wft_schedule').upsert(b).then(r => r, e => ({ error:e })); DB.dayBusy = false;
   if (error) return dbSaveFailed(error, 'Could not save the schedule change: ');
   DB.dayQ = DB.dayQ.filter(x => !b.includes(x)); if (DB.dayQ.length) dbFlushDays(); else if (!DB.chgQ.length && !DB.q.length) dbSaveOk(); else dbKeepOutbox();
@@ -4829,12 +4829,15 @@ async function dbLoadTeams(p) {
 let feedPolling=false;
 async function feedPoll(only) {
  if(feedPolling||!DB.on||!S.auth)return;feedPolling=true;
- try{for(const acc of W.LIVE.accs.filter(inScope).filter(a=>!only||only.includes(a))){
+ try{for(const acc of readAccs().filter(inScope).filter(a=>!only||only.includes(a))){
    const f=await feedRow(acc,false).catch(()=>null);if(!f)continue;
    DB.teams[acc]={...(DB.teams[acc]||{}),feedAt:f.read_at,feedOk:f.ok,feedErr:f.ok?'':f.error||''};
-   if(!f.read_at||f.read_at===FEED_SEEN[acc]||!DB.lastJ[acc])continue;
+   if(!f.read_at||f.read_at===FEED_SEEN[acc])continue;
+   if(!DB.lastJ[acc]){await dbLoadTeams({scope:[acc]});continue;}
    const g=await feedRow(acc,true).catch(()=>null);if(!g||!g.payload||!Array.isArray(g.payload.shifts))continue;
-   const J=feedJ(DB.lastJ[acc],g.payload);DB.lastJ[acc]=J;FEED_SEEN[acc]=g.read_at;await dbShiftsCheck(acc,J,true);
+   const previous=DB.lastJ[acc],J=feedJ(previous,g.payload),members=x=>JSON.stringify((x.groups||[]).filter(g=>g.active).map(g=>[g.id,g.name,g.sourceTeamId,g.sourceSite,g.sourceTimeZone,[...(g.userIds||[])].sort()]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))));
+   if(members(previous)!==members(J)){await dbRestoreTeam(acc,J,CONN.pilot||{});if(['Admin','RTA','Team lead'].includes(W.ME.role))await dbSyncPeople();const L=W.LIVE.teams[acc]||{};DB.teams[acc]={...DB.teams[acc],st:'ok',loaded:true,people:L.people,shifts:L.shifts,stations:(L.stations||[]).length};}
+   DB.lastJ[acc]=J;FEED_SEEN[acc]=g.read_at;await dbShiftsCheck(acc,J,true);
  }}finally{feedPolling=false;render();}
 }
 async function dbSaveReaderOriginals(acc,changes) {
