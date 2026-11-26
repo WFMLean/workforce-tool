@@ -680,7 +680,7 @@ const ACCOUNTS = [
   // Caliber (Shifts team "WFM - Caliber") is left out for now, per JM 2026-10-06
 ];
 const ACC = Object.fromEntries(ACCOUNTS.map(a => [a.id, a]));
-const LOCNAME = { BAQ: 'Barranquilla', BOG: 'Bogotá', GUA: 'Guatemala', MNL: 'Manila', MDE: 'Medellín' }, LOCSHORT = { Barranquilla: 'BAQ', 'Bogotá': 'BOG', Guatemala: 'GUA', Manila: 'MNL', 'Medellín': 'MDE' };
+const LOCNAME = { BAQ: 'Barranquilla', BOG: 'Bogotá', GUA: 'Guatemala', MNL: 'Manila', MDE: 'Medellín', GDL:'Guadalajara', CTG:'Cartagena' }, LOCSHORT = { Barranquilla: 'BAQ', 'Bogotá': 'BOG', Guatemala: 'GUA', Manila: 'MNL', 'Medellín': 'MDE', Guadalajara:'GDL', Cartagena:'CTG' };
 const LOCF = { v: 'all' };                              // global location filter (LSG Branch)
 const LOBS = ACCOUNTS.flatMap(a => a.lobs.map(l => ({ acc: a.id, lob: l.id, key: a.id + '|' + l.id, hc: l.hc, minInt: l.minInt, name: `${a.name} · ${l.id}`, site: LOCNAME[a.site] || a.site, station: l.id })));
 const LOB = Object.fromEntries(LOBS.map(l => [l.key, l]));
@@ -1022,9 +1022,9 @@ function floorInstant() {
 }
 function accountClock(acc) { return clockInZone(zoneOf(acc), floorInstant()); }
 // today in the person's account, not the browser: a Manila browser editing Crane, or a tab left open past midnight, still sends the right days
-const accDay = a => { try { return accountClock(a.acc).day; } catch (e) { return TODAY; } };
+const accDay = a => { try { return accountClock(a).day; } catch (e) { return TODAY; } };
 const limitFor = (d, a) => {
-  let f = WFc; try { if (a) f = accountClock(a.acc); } catch(e) { /* reference data bootstraps before zone settings */ }
+  let f = WFc; try { if (a) f = accountClock(a); } catch(e) { /* reference data bootstraps before zone settings */ }
   return d === f.day ? f.clock : d === addD(f.day,-1) ? f.clock + 1440 : d < f.day ? Infinity : -Infinity;
 };
 function refreshFloor() { if (WFc.live) Object.assign(WFc, clockInZone(WFc.zone)); }
@@ -1110,7 +1110,7 @@ const STATUS = {
 function live() {
   refreshFloor(); const rows = [];
   AG.forEach(a => {
-    if (a.inactive) return; const local = accountClock(a.acc), c = local.clock, D = local.day, y = addD(D,-1);
+    if (a.inactive) return; const local = accountClock(a), c = local.clock, D = local.day, y = addD(D,-1);
     let d = D, s = sched(a, D);
     const sy = sched(a, y);
     if (sy.working && sy.e > 1440 && c + 1440 < sy.e) { d = y; s = sy; }
@@ -1456,6 +1456,8 @@ function parseTeamId(s) {            // accepts the bare groupId or the whole "G
   m = s.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i); return m ? m[0].toLowerCase() : '';
 }
 function teamFor(a) {
+  if(a.ambiguousTeam)return null;
+  if(a.shiftsTeamId && (ACC[a.acc]?.sources||[]).some(s=>s.teamId===a.shiftsTeamId))return {acc:a.acc,site:a.site,station:a.station,team:a.shiftsTeam,teamId:a.shiftsTeamId};
   const l = LOB[a.key] || {}, sc = r => (r.station === '*' ? 0 : r.station === l.station ? 2 : -9) + (r.site === '*' ? 0 : r.site === l.site ? 1 : -9);
   return TEAM_MAP.filter(r => r.acc === a.acc && GUID.test(r.teamId)).map(r => [sc(r), r]).filter(x => x[0] >= 0).sort((x, y) => y[0] - x[0]).map(x => x[1])[0] || null;
 }
@@ -1590,7 +1592,7 @@ function restoreAccount(id) {
 function addAccount(o) {             // o: {name, site, team?, lobs:[{id, hc, minInt}], absTarget, adhTarget, members?}
   let id = o.id || o.name.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase(); while (ACC[id])   // o.id: a fixed id for live accounts (it is the database key)
     id = id.slice(0, 2) + String.fromCharCode(65 + Math.floor(Math.random() * 26));
-  const acc = { id, name: o.name, site: o.site || 'BAQ', team: o.team || '—', teamId: o.teamId || '', absTarget: o.absTarget || 7, adhTarget: o.adhTarget || 95, lobs: o.lobs, manual: !o.team };
+  const acc = { id, name: o.name, site: o.site || 'BAQ', team: o.team || '—', teamId: o.teamId || '', absTarget: o.absTarget || 7, adhTarget: o.adhTarget || 95, lobs: o.lobs, manual: !o.team, sources:o.sources||[],cacheSources:o.cacheSources||[] };
   ACCOUNTS.push(acc); ACC[id] = acc;
   o.lobs.forEach(l => { const key = id + '|' + l.id, x = { acc: id, lob: l.id, key, hc: l.hc, minInt: l.minInt || 2, name: `${acc.name} · ${l.id}`, site: LOCNAME[acc.site] || acc.site, station: l.id }; LOBS.push(x); LOB[key] = x; PAT_BY_LOB[key] = ['P2']; ALLOC[key] = { method: 'schedule', pct: 12, min: 1, hold: true }; });
   let added = 0;
@@ -1883,9 +1885,9 @@ const tzOf = a => TZ[a && a.site] ?? TZ[LOCNAME[(ACC[(a || {}).acc] || {}).site]
 const TZ_CHOICES = [['America/Bogota', '(UTC−05:00) Bogotá, Lima, Quito, Rio Branco'], ['America/Guatemala', '(UTC−06:00) Central America (Guatemala)'], ['America/Mexico_City', '(UTC−06:00) Guadalajara, Mexico City'],
   ['America/Chicago', 'US Central (Chicago, Dallas) · DST'], ['America/New_York', 'US Eastern (New York) · DST'], ['America/Denver', 'US Mountain (Denver) · DST'], ['America/Phoenix', '(UTC−07:00) Arizona'],
   ['America/Los_Angeles', 'US Pacific (Los Angeles) · DST'], ['Asia/Manila', '(UTC+08:00) Manila'], ['UTC', '(UTC) Coordinated Universal Time']];
-const SITE_ZONE = { Barranquilla: 'America/Bogota', 'Bogotá': 'America/Bogota', 'Medellín': 'America/Bogota', Guatemala: 'America/Guatemala', Manila: 'Asia/Manila' };
+const SITE_ZONE = { Barranquilla: 'America/Bogota', 'Bogotá': 'America/Bogota', 'Medellín': 'America/Bogota', Guatemala: 'America/Guatemala', Manila: 'Asia/Manila', Guadalajara:'America/Mexico_City' };
 const ACCTZ = {};
-const zoneOf = accId => ACCTZ[accId] || (accId === 'ONT' ? 'Asia/Manila' : SITE_ZONE[LOCNAME[(ACC[accId] || {}).site]] || 'America/Bogota');
+const zoneOf = value => {const a=typeof value==='object'?value:null, id=a?a.acc:value;return a?.shiftsZone || ACCTZ[id] || (id==='ONT'?'Asia/Manila':SITE_ZONE[a?.site] || SITE_ZONE[LOCNAME[(ACC[id]||{}).site]] || 'America/Bogota');};
 const ZF = {};
 function zoneOffAt(zone, ms) {              // minutes east of UTC in that zone at that instant
   try { const f = ZF[zone] || (ZF[zone] = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
@@ -1908,8 +1910,8 @@ function applyAccTz(map) { Object.assign(ACCTZ, map || {}); emit(); }
 function readTeamShifts(accId, J, stOf) {
   const local = iso => toZoneLocal(accId, iso);     // shifts arrive in UTC: shown in the account (Shifts team) time zone
   const codes = {}, days = [], perDay = {}, imported = {}, tagged = {};
-  (J.shifts || []).forEach(s => { if (!okT(s.start) || !okT(s.end) || !stOf[s.userId]) return; const [d, m] = local(s.start), [de, me] = local(s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;   // end read on the wall clock, so a night shift across a DST change keeps its 06:00 end
-    ((perDay[s.userId] = perDay[s.userId] || {})[d] = perDay[s.userId][d] || []).push({ s: m, e, label: s.label, notes: s.notes, activities: readShiftActivities(accId,d,s.activities) }); });
+  (J.shifts || []).forEach(s => { if (!okT(s.start) || !okT(s.end) || !stOf[s.userId]) return; const origin={acc:accId,shiftsZone:s.sourceTimeZone}, [d, m] = toZoneLocal(origin,s.start), [de, me] = toZoneLocal(origin,s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;   // end read on the wall clock, so a night shift across a DST change keeps its 06:00 end
+    ((perDay[s.userId] = perDay[s.userId] || {})[d] = perDay[s.userId][d] || []).push({ s: m, e, label: s.label, notes: s.notes, activities: readShiftActivities({acc:accId,shiftsZone:s.sourceTimeZone},d,s.activities) }); });
   Object.entries(perDay).forEach(([id, byD]) => Object.entries(byD).forEach(([d, list]) => { const { main, others } = mergeDayShifts(list);
     (imported[id]=imported[id]||{})[d]={main,others};
     const rs=tsName(main.parts.map(p=>p.label).find(n=>RCFG[tsName(n)])||'');
@@ -1931,7 +1933,7 @@ function readTeamLeave(accId, J, stOf, R) {
     if(top)usual[id]={s:+top[0].split('-')[0],e:+top[0].split('-')[1],dows:cnt>=5?w.map(c=>c>=2):null};});
   (J.timeOff||[]).forEach(t=>{
     if(!okT(t.start)||!okT(t.end)||!stOf[t.userId]||!(Date.parse(t.end)>Date.parse(t.start)))return;
-    const [first,m]=local(t.start),[last]=local(new Date(Date.parse(t.end)-1).toISOString()),[endDay,endMin]=local(t.end),rs=reasonOf(t),from=dayMin(first,m),to=dayMin(endDay,endMin);
+    const origin={acc:accId,shiftsZone:t.sourceTimeZone},[first,m]=toZoneLocal(origin,t.start),[last]=toZoneLocal(origin,new Date(Date.parse(t.end)-1).toISOString()),[endDay,endMin]=toZoneLocal(origin,t.end),rs=reasonOf(t),from=dayMin(first,m),to=dayMin(endDay,endMin);
     /* timed leave that starts after midnight inside last night's overnight shift belongs to that shift (leave from 00:00 is a calendar-day request) */
     const pd=addD(first,-1),psh=SHIFTS[(codes[t.userId]||{})[pd]];
     if(!RCFG[rs].rest&&m>0&&psh&&psh.e>1440&&from<dayMin(pd,psh.e))leaveDays.push({id:t.userId,d:pd,rs,from,to});
@@ -1964,18 +1966,33 @@ function readTeamLeave(accId, J, stOf, R) {
   leaveDays.forEach(applyLeave);
   return tags;
 }
+function combineTeamReads(reads) {
+  const out={groups:[],members:[],shifts:[],timeOff:[],reasons:[],requests:[],swaps:[],offers:[],sources:reads.map(r=>r.source)}, seen={};
+  for(const {source,payload:p} of reads){
+    const meta={sourceTeamId:source.teamId,sourceTeam:source.team,sourceSite:source.site,sourceTimeZone:source.timeZone};
+    for(const k of ['groups','members','shifts','timeOff','reasons','requests','swaps','offers']){
+      if(p[k]===null){out[k]=null;continue;} if(out[k]===null)continue;
+      for(const x of p[k]||[]){const key=(k==='members'?'':source.teamId+'|')+(x.id||JSON.stringify(x));const set=seen[k]||(seen[k]=new Set());if(set.has(key))continue;set.add(key);
+        out[k].push({...x,...meta,...(k==='groups'?{name:x.name||source.team,originalName:x.name||''}:{})});}
+    }
+  }
+  for(const k of ['from','to']){const a=reads.map(r=>r.payload[k]).filter(Boolean).sort();out[k]=k==='from'?a[0]:a.at(-1);}
+  out.requestError=reads.map(r=>r.payload.requestError).filter(Boolean).join('; ');out.swapError=reads.map(r=>r.payload.swapError).filter(Boolean).join('; ');
+  return out;
+}
+
 function loadLiveTeam(accId, J, opt = {}) {
   const acc = ACC[accId]; if (!acc || !J) return null;
   dropAgents(accId, true); const site = opt.site || LOCNAME[acc.site] || 'Barranquilla';
   const groups = (J.groups || []).filter(g => g.active && (g.userIds || []).length), mem = new Map((J.members || []).map(m => [m.id, m]));
-  const stOf = {}; groups.forEach(g => g.userIds.forEach(id => { if (!stOf[id]) stOf[id] = cleanSt(g.name) || 'Unassigned'; }));
-  const G = {}; Object.entries(stOf).forEach(([id, st]) => { const lid = lobIdFor(site, st); G[lid] = G[lid] || { hc: 0, site, station: st }; G[lid].hc++; });
+  const stOf={},originOf={};groups.forEach(g=>g.userIds.forEach(id=>{if(!stOf[id]){stOf[id]=cleanSt(g.name)||'Unassigned';originOf[id]=g;}else if(originOf[id].sourceTeamId!==g.sourceTeamId)originOf[id]={...originOf[id],ambiguous:true};}));
+  const G = {}; Object.entries(stOf).forEach(([id, st]) => { const location=originOf[id]?.sourceSite||site,lid = lobIdFor(location, st); G[lid] = G[lid] || { hc: 0, site:location, station: st }; G[lid].hc++; });
   setLobs(accId, G);
   const local = iso => toZoneLocal(accId, iso);     // shifts arrive in UTC: shown in the account (Shifts team) time zone
   const { codes, days, imported, tagged } = readTeamShifts(accId, J, stOf), tags = readTeamLeave(accId, J, stOf, { codes, days, imported, tagged });
   const first = (okT(J.from) ? local(J.from)[0] : days.sort()[0]) || TODAY, last = (okT(J.to) ? local(J.to)[0] : days.sort().pop()) || addD(TODAY, 21);
-  Object.entries(stOf).forEach(([id, st]) => { const m = mem.get(id) || {}, lid = lobIdFor(site, st);
-    const a = { id, name: m.name || 'Shifts user ' + id.slice(0, 6), acc: accId, site, lob: lid, key: accId + '|' + lid, tl: '—', email: (m.mail || '').toLowerCase(), sup: '', station: st, shiftsGroup: st, position: m.job || '', hcStatus: 'In HC', inactive: false,
+  Object.entries(stOf).forEach(([id, st]) => { const m=mem.get(id)||{},origin=originOf[id]||{},location=origin.sourceSite||site,lid=lobIdFor(location,st);
+    const a = { id, name: m.name || 'Shifts user ' + id.slice(0, 6), acc: accId, site:location, shiftsTeamId:origin.ambiguous?null:origin.sourceTeamId, shiftsTeam:origin.sourceTeam, shiftsZone:origin.sourceTimeZone, ambiguousTeam:!!origin.ambiguous, lob: lid, key: accId + '|' + lid, tl: '—', email: (m.mail || '').toLowerCase(), sup: '', station: st, shiftsGroup: origin.originalName ?? st, position: m.job || '', hcStatus: 'In HC', inactive: false,
       pat: [{ from: ANCHOR, p: 'NONE', off: 0 }], cap: { codes: { ...(codes[id] || {}) }, first, last, weekEnd: last, stop: true }, lateP: 0, absP: 0, real: true, live: true, fromShifts: true, notInShifts: false, rosterRow: null };
     AG.push(a); AGI[a.id] = a; range(first, last).forEach(d => ensurePlan(a, d, 'Captured from Shifts')); });
   Object.entries(imported).forEach(([id,byD])=>Object.entries(byD).forEach(([d,x])=>{const o=OV[kOf(id,d)]=OV[kOf(id,d)]||{};
@@ -2016,9 +2033,9 @@ function loadTeamRequests(accId, J) {
     if (!q.id || !q.startDateTime || !q.endDateTime) continue;
     const start = new Date(q.startDateTime), end = new Date(q.endDateTime);
     if (!Number.isFinite(+start) || !Number.isFinite(+end) || end <= start) continue;
-    const [from, sm] = toZoneLocal(accId, start.toISOString());
-    const [to] = toZoneLocal(accId, new Date(+end - 1).toISOString());
-    const [endDay, em] = toZoneLocal(accId, end.toISOString());
+    const [from, sm] = toZoneLocal(a, start.toISOString());
+    const [to] = toZoneLocal(a, new Date(+end - 1).toISOString());
+    const [endDay, em] = toZoneLocal(a, end.toISOString());
     const nm = reasons.get(q.timeOffReasonId) || 'Personal time-off', mapped = tsName(nm);
     const reason = RCFG[mapped] ? mapped : TS_UNAPPROVED[nm] || 'Personal time-off';
     const status = q.state === 'approved' ? 'Approved' : q.state === 'declined' ? 'Denied' : q.state === 'pending' ? 'Pending' : 'Unknown';
@@ -2037,7 +2054,7 @@ function loadTeamRequests(accId, J) {
 function loadTeamSwaps(accId, J) {
   if (!Array.isArray(J.swaps)) return { available:false, count:0, unmatched:0, outside:0 };
   const ids = new Set(AG.filter(a => a.acc === accId).map(a => a.id)), sh = new Map((J.shifts || []).filter(x => x.id).map(x => [x.id, x]));
-  const day = id => { const x = sh.get(id); return x && okT(x.start) ? toZoneLocal(accId, x.start)[0] : ''; }, ts = v => v ? String(v).slice(0,16).replace('T',' ') : '';
+  const day = id => { const x = sh.get(id); return x && okT(x.start) ? toZoneLocal({acc:accId,shiftsZone:x.sourceTimeZone}, x.start)[0] : ''; }, ts = v => v ? String(v).slice(0,16).replace('T',' ') : '';
   const used = new Set(SWAPS.filter(x => !x.teams).map(x => x.id)), next = []; let unmatched = 0, outside = 0;
   const add = (q, offer) => {
     const A = AGI[q.senderUserId], B = AGI[q.recipientUserId];
@@ -2066,17 +2083,17 @@ function feedMerge(base, F) {
   return { ...B, ...F,
     members:list(F.members, B.members), groups:list(F.groups, B.groups), reasons:list(F.reasons, B.reasons),
     requests:Array.isArray(F.requests) ? F.requests : B.requests, swaps:Array.isArray(F.swaps) ? F.swaps : B.swaps, offers:Array.isArray(F.swaps) ? (F.offers || []) : B.offers,
-    shifts:[...(B.shifts || []).filter(x => !inside(x)), ...(F.shifts || [])].filter(x => keep('s' + (x.id || x.userId + x.start + x.end))),
-    timeOff:[...(B.timeOff || []).filter(x => !inside(x)), ...(F.timeOff || [])].filter(x => keep('t' + x.userId + x.start + x.end + (x.reasonId || ''))),
+    shifts:[...(B.shifts || []).filter(x => !inside(x)), ...(F.shifts || [])].filter(x => keep('s' + (x.sourceTeamId||'') + (x.id || x.userId + x.start + x.end))),
+    timeOff:[...(B.timeOff || []).filter(x => !inside(x)), ...(F.timeOff || [])].filter(x => keep('t' + (x.sourceTeamId||'') + x.userId + x.start + x.end + (x.reasonId || ''))),
     from:B.from && Date.parse(B.from) < a ? B.from : F.from, to:B.to && Date.parse(B.to) > b ? B.to : F.to, fromFeed:true };
 }
 /* what publishing sends: one request per run of consecutive days for one person (window = those site days, shifts in UTC) */
 function publishPayload(a, dates, teamId) {
-  const ds = [].concat(dates).sort(), utc = (day, min) => new Date(toUtcMs(a.acc, day, min)).toISOString().replace(/\.\d+Z$/, 'Z');   // account (Shifts team) time zone, not the person's site
+  const ds = [].concat(dates).sort(), utc = (day, min) => new Date(toUtcMs(a, day, min)).toISOString().replace(/\.\d+Z$/, 'Z');   // account (Shifts team) time zone, not the person's site
   const shifts=ds.map(d=>{const s=sched(a,d);if(!s.working||(s.absence&&fullOff(s)))return null;const activities=validateActivities(breaksOf(a,d,s.code),s.code).map(b=>({displayName:b[4],code:b[5],theme:b[6],startDateTime:utc(d,b[0]),endDateTime:utc(d,b[1]),isPaid:b[3]}));return {start:utc(d,s.s),end:utc(d,s.e),notes:shiftLabel(s.code),label:'Working day',theme:'blue',activities};}).filter(Boolean);
   /* replace = this person's shifts that START on these days (winFrom → winTo). Shifts only lists shifts that sit fully inside the list window,
      so the list runs one day further (listTo) to catch overnight shifts; the flow (v2) then keeps only those starting inside the days. */
-  return { action: 'publishshifts', teamId, email: a.email, group: a.station || '', winFrom: utc(ds[0], 0), winTo: utc(ds[ds.length - 1], 1440), listTo: utc(addD(ds[ds.length - 1], 1), 1440), replace: true, publisherVersion:3, shifts };
+  return { action: 'publishshifts', teamId, email: a.email, group: a.shiftsGroup ?? a.station ?? '', winFrom: utc(ds[0], 0), winTo: utc(ds[ds.length - 1], 1440), listTo: utc(addD(ds[ds.length - 1], 1), 1440), replace: true, publisherVersion:3, shifts };
 }
 /* two-way Shifts check: Shifts vs the tool per person-day (site time). side = which one is newer:
    'shifts' = changed in Shifts after the tool's version reached it (or the tool never edited the day) → the tool should take it;
@@ -2096,8 +2113,8 @@ function shiftsCheck(accId, J, opt = {}) {
   const who = uid => (AGI[uid] && AGI[uid].acc === accId ? AGI[uid] : byMail[mail.get(uid)]) || null;
   const got = {}, unknown = new Set(), lbl = (s, e) => `${hm(s)}–${hm(e)}`;
   (J.shifts || []).forEach(s => { if (!okT(s.start) || !okT(s.end)) return; const a = who(s.userId); if (!a) { unknown.add(s.userId); return; }
-    const [d, m] = local(s.start), [de, me] = local(s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;
-    ((got[a.id] = got[a.id] || {})[d] = got[a.id][d] || []).push({ s: m, e, id: s.id, label: s.label || '', notes: s.notes || '', activities: Array.isArray(s.activities) ? readShiftActivities(accId,d,s.activities) : null }); });
+    const origin={acc:accId,shiftsZone:s.sourceTimeZone}, [d, m] = toZoneLocal(origin,s.start), [de, me] = toZoneLocal(origin,s.end), e = me + 1440 * diffD(d, de); if (e <= m) return;
+    ((got[a.id] = got[a.id] || {})[d] = got[a.id][d] || []).push({ s: m, e, id: s.id, label: s.label || '', notes: s.notes || '', activities: Array.isArray(s.activities) ? readShiftActivities({acc:accId,shiftsZone:s.sourceTimeZone},d,s.activities) : null }); });
   Object.values(got).forEach(byD => Object.keys(byD).forEach(d => { const list = byD[d]; if (list.length < 2) return; const { main, others } = mergeDayShifts(list), p = main.parts;   // Working day + OT = one span
     const acts = p.some(x => x.activities !== null) ? [...p.flatMap(x => x.activities || []), ...[]] : null;
     byD[d] = [{ s: main.s, e: main.e, id: p[0].id, ids: p.map(x => x.id), notes: p.map(x => x.notes).filter(Boolean).join(' · '), activities: acts }, ...others.map(b => b.parts[0])]; }));
@@ -2495,7 +2512,7 @@ global.WF = {
   // utils
   pad, iso, parse, addD, diffD, dow, range, weekStart, hm, esc, fmtD, fmtS, DOW, pct, fmtPct, dur, initials, TODAY, hashKey,
   // data
-  kOf, loadTeamSwaps, feedMerge, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, shiftCoreSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, loadLiveTeam, syncShiftsLeave, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
+  kOf, loadTeamSwaps, feedMerge, readShiftActivities, activityRows, validateActivities, activityPaidMin, activityUtilization, shiftSignature, shiftCoreSignature, clockInZone, accountClock, floorInstant, refreshFloor, setDisplayZone, addReason, applyReasonConfig, ME, RTAS, PUB, LOGIN_IMPORTS, LOGIN_COVER, SWAPS, SWAP_RULES, USERS, RCFG, LEGACY_REASONS, LIVE, loadLive, combineTeamReads, loadLiveTeam, syncShiftsLeave, loadTeamRequests, publishPayload, dayRuns, shiftsCheck, adoptShifts, markPublished, SCHK, PUBOK, queueSync, TZ, TZ_CHOICES, zoneOf, zoneLabel, zoneOffAt, toUtcMs, toZoneLocal, setAccTz, applyAccTz, importClockins, applyClockins, clockRow, onPeople: f => PEOPLE_HOOKS.push(f), applySavedDays, applySavedChanges, applySavedDecisions, dayRow, setSender: f => { SENDER = f; }, onCell: f => CELL_HOOKS.push(f), onChangeLog: f => CHANGE_HOOKS.push(f), rosterView, personFlags, leadOf, supOf, PLAN, CHG, CHANGE_REASONS, planDiff, importPlan, lockPlan, SHIFTS_TEAMS, TEAM_MAP, addTeamMap, setTeamMap, removeTeamMap, teamFor, teamMapStatus, parseTeamId, CHATS, ALLOC, NOTIFY, ROSTER_SRC, TEAMS_DIR, PAT_BY_LOB, ACCOUNTS, ACC, LOBS, LOB, SHIFTS, PATTERNS, REASONS, RTYPE, ACTIVITIES, CFG, AG, AGI, TLS, REQ, AUD, SYNC, STATUS,
   // logic
   get clock() { return WFc.clock; }, set clock(v) { WFc.clock = v; if (WFc.day === TODAY && Math.abs(v - realMin()) > 2) WFc.live = false; emit(); }, realMin,
   get floor() { return { day: WFc.day, clock: WFc.clock, live: WFc.live, zone: WFc.zone }; }, setFloor, lastClockDay,
@@ -2854,7 +2871,7 @@ const ORDER = ['late','out','nologin','offsched','inlate','in','upcoming','nodat
 /* the floor for one day: everyone scheduled that day, with what actually happened (present / absent / no-show / late) and how it's tagged */
 function floorDay() {
   const out = [];
-  W.AG.forEach(a => { if (a.inactive || !accOk(a) || !inLoc(a)) return; const {day:D, clock:c} = W.accountClock(a.acc); const s = W.sched(a, D); if (!s.working) return;
+  W.AG.forEach(a => { if (a.inactive || !accOk(a) || !inLoc(a)) return; const {day:D, clock:c} = W.accountClock(a); const s = W.sched(a, D); if (!s.working) return;
     const ab = s.absence, full = !!ab && W.fullOff(s), known = W.loginKnown(a, D), ses = known ? W.logins(a, D) : [], present = ses.length > 0;
     const A = present ? W.adh(a, D) : null, started = c >= s.s + W.CFG.grace, ended = c >= s.e, partLate = ab && !full && /late/i.test(ab.reason);
     const arr = W.arrivalOf(a, D), last = ses[ses.length - 1], outMid = present && last && !last.open && c >= s.s && c < s.e && c - last.o > W.CFG.grace;
@@ -3092,7 +3109,7 @@ function scheduleReadStatus() {
 
 function scheduleDetail(id,d) {
  const a=W.AGI[id],k=W.kOf(id,d),p=W.PLAN[k],current=W.sched(a,d),events=W.CHG[k]||[],checks=(W.SCHK[a.acc]||{}).rows||[],conflict=checks.find(r=>r.k===k);
- open(`${esc(a.name)} · ${fmtD(d)}`,`<dl class="kv"><dt>Saved original</dt><dd>${p?esc(W.shiftLabel(p.code)):'Not saved'}</dd><dt>Current in tool</dt><dd>${esc(W.shiftLabel(current.code))}</dd><dt>Teams time zone</dt><dd>${esc(W.zoneOf(a.acc))}</dd>${conflict?`<dt>Teams currently</dt><dd>${esc(conflict.shiftsLbl)} · ${esc(CHK_TYPES[conflict.type][0])} · review before sending</dd>`:''}</dl><h3>Changes recorded</h3>${events.map(x=>`<p><b>${esc(x.kind)}</b> · ${esc(x.at)} · ${esc(x.by)}<br>${esc(x.before)} → ${esc(x.after)}<br>${esc(x.reason||'No reason supplied by Teams')}</p>`).join('')||'<p>No changes recorded for this day.</p>'}<p class="meta">Reading Teams never sends a change back. Edit schedules is the place to prepare changes.</p><button class="btn" data-a="go" data-v="builder">Edit schedules</button>`);
+ open(`${esc(a.name)} · ${fmtD(d)}`,`<dl class="kv"><dt>Saved original</dt><dd>${p?esc(W.shiftLabel(p.code)):'Not saved'}</dd><dt>Current in tool</dt><dd>${esc(W.shiftLabel(current.code))}</dd><dt>Teams time zone</dt><dd>${esc(W.zoneOf(a))}</dd>${conflict?`<dt>Teams currently</dt><dd>${esc(conflict.shiftsLbl)} · ${esc(CHK_TYPES[conflict.type][0])} · review before sending</dd>`:''}</dl><h3>Changes recorded</h3>${events.map(x=>`<p><b>${esc(x.kind)}</b> · ${esc(x.at)} · ${esc(x.by)}<br>${esc(x.before)} → ${esc(x.after)}<br>${esc(x.reason||'No reason supplied by Teams')}</p>`).join('')||'<p>No changes recorded for this day.</p>'}<p class="meta">Reading Teams never sends a change back. Edit schedules is the place to prepare changes.</p><button class="btn" data-a="go" data-v="builder">Edit schedules</button>`);
 }
 let scheduleReadBusy=false;
 /* Refresh from Teams: asks the server to read the account in view (All accounts = every account in scope). The server reads ONE account
@@ -3420,7 +3437,7 @@ function pAudit() {
     <select class="in" data-f="audUser" aria-label="User"><option value="all">All users</option>${users.map(u => `<option ${F.user === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}</select>
     <div class="seg">${[[7,'7 d'],[30,'30 d'],[120,'All']].map(([k, l]) => `<button class="${F.days === k ? 'on' : ''}" data-a="audDays" data-v="${k}">${l}</button>`).join('')}</div>
     <input class="in" id="audQ" data-f="audQ" placeholder="Search agent, ID, reason…" value="${esc(F.q)}" style="width:220px"><button class="btn" data-a="expAud">Export CSV</button></div>
-  <section class="panel"><div class="tw tall"><table><thead><tr><th>When</th><th>User</th><th>Module</th><th>Action</th><th>Record</th><th>Before</th><th>After</th><th>Note</th></tr></thead><tbody>
+  ${pFlowEvents()}<section class="panel"><div class="tw tall"><table><thead><tr><th>When</th><th>User</th><th>Module</th><th>Action</th><th>Record</th><th>Before</th><th>After</th><th>Note</th></tr></thead><tbody>
     ${pageRows.map(x => `<tr><td class="num" style="white-space:nowrap">${esc(x.at)}</td><td style="white-space:nowrap">${esc(x.user)}</td><td><span class="pill">${esc(x.module)}</span></td><td>${esc(x.action)}</td><td class="nm">${esc(x.record)}</td><td class="meta">${esc(x.before)}</td><td>${esc(x.after)}</td><td class="meta">${esc(x.note)}</td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">No entries match.</div></td></tr>'}</tbody></table></div>
     ${rows.length > 100 ? `<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:10px"><span class="meta">${F.page * 100 + 1}–${Math.min(rows.length, F.page * 100 + 100)} of ${rows.length}</span><button class="btn sm" data-a="audPage" data-v="-1" ${F.page ? '' : 'disabled'}>←</button><button class="btn sm" data-a="audPage" data-v="1" ${(F.page + 1) * 100 < rows.length ? '' : 'disabled'}>→</button></div>` : ''}</section>`;
 }
@@ -4327,16 +4344,16 @@ async function dbAfterSignIn() {
   await dbLoadLive(p);
   W.audit('Access', 'Signed in', p.email, '', p.role, 'Supabase Auth');
   S.lgErr = ''; S.auth = true; S.acc = W.LIVE.accs.length === 1 ? W.LIVE.accs[0] : 'all'; S.page = landingPage();
-  await dbLoadAudit(); if (p.role === 'Admin') await dbLoadUsers(); render();
+  await dbLoadAudit(); dbStartFlowEvents(); if (p.role === 'Admin') await dbLoadUsers(); render();
 }
 /* live data: the portal's synced Crane roster, Shifts schedules and requests, plus the tool's own saved work */
 /* accounts saved in the database (wft_accounts) — added from the Accounts tab — are created on sign-in; archived ones are removed */
 async function dbLoadAccounts() {
-  const r = await DB.sb.from('wft_accounts').select('id,name,site,team_name,team_id,abs_target,adh_target,archived'); if (r.error) { console.warn('accounts', r.error.message); return; }
+  const r = await DB.sb.from('wft_accounts').select('id,name,site,team_name,team_id,abs_target,adh_target,archived,team_sources,cache_sources'); if (r.error) { console.warn('accounts', r.error.message); return; }
   (r.data || []).forEach(x => {
     if (x.archived) { if (W.ACC[x.id] && !W.ARCHIVE.some(b => b.acc.id === x.id)) W.removeAccount(x.id, 'Archived'); return; }
-    if (W.ACC[x.id] || !x.team_id) return;
-    W.addAccount({ id:x.id, name:x.name, site:x.site || 'BAQ', team:x.team_name || x.name, teamId:x.team_id, lobs:[], absTarget:+x.abs_target || 7, adhTarget:+x.adh_target || 95 });
+    if(W.ACC[x.id]){Object.assign(W.ACC[x.id],{sources:x.team_sources||[],cacheSources:x.cache_sources||[]});return;} if(!x.team_id)return;
+    W.addAccount({ id:x.id, name:x.name, site:x.site || 'BAQ', team:x.team_name || x.name, teamId:x.team_id, lobs:[], sources:x.team_sources||[],cacheSources:x.cache_sources||[], absTarget:+x.abs_target || 7, adhTarget:+x.adh_target || 95 });
   });
 }
 /* reader list in wft_settings 'pilot': read = accounts loaded straight from Shifts; accounts = accounts that publish */
@@ -4540,6 +4557,7 @@ const stOf = a => a.station || (W.LOB[a.key] || {}).station || (W.LOB[a.key] || 
 const stNames = a => [...new Set([stOf(a), a.shiftsGroup].filter(Boolean))];
 function pilotCfg() { const P = CONN.pilot || (DEV ? { read:['ONT'], accounts:['ONT'], site:{ ONT:'Manila' } } : {});   /* local test mode mirrors the live set-up (OnTrac) */ return { accounts:P.accounts || [], site:P.site || { ONT:'Manila' }, mode:P.mode || null, scope:P.scope || {} }; }
 function pilotGate(a) {
+  const source=(W.ACC[a?.acc]?.sources||[]).find(s=>s.teamId===a?.shiftsTeamId);if(a?.ambiguousTeam||(W.ACC[a?.acc]?.sources||[]).length>1&&!a?.shiftsTeamId||source?.publishing===false)return {mode:null,why:'Confirm the source Shifts team and publishing setup before sending'};
   const P = pilotCfg(); if (!a || !P.accounts.includes(a.acc)) return { mode:null, why:`${a ? W.ACC[a.acc].name : 'This account'} isn't in the publishing controls` };
   const sc = P.scope[a.acc] || {}, st = sc.stations || [], pp = sc.people || [];
   if ((st.length || pp.length) && !stNames(a).some(n => st.includes(n)) && !pp.includes(a.id)) return { mode:null, why:`${a.name} isn't in the pilot stations / people for ${W.ACC[a.acc].name}` };
@@ -4549,6 +4567,7 @@ const gateLabel = g => g.mode === 'live' ? ['Will publish to Shifts', 'ok'] : g.
 function gateSummary(ids) { const n = { live:0, dry:0, none:0 }; [...new Set(ids)].forEach(id => { const g = pilotGate(W.AGI[id]); n[g.mode || 'none']++; });
   return `<div class="note" style="margin-bottom:10px"><b>Microsoft Shifts:</b> ${[n.live ? `<span class="pill ok">${n.live} will publish</span>` : '', n.dry ? `<span class="pill info">${n.dry} dry run (nothing written)</span>` : '', n.none ? `<span class="pill muted">${n.none} saved in the tool only (not in the pilot)</span>` : ''].filter(Boolean).join(' ')}</div>`; }
 W.setSender(async j => {
+  const person=W.AGI[j.agent],source=(W.ACC[person?.acc]?.sources||[]).find(s=>s.teamId===person?.shiftsTeamId);if(person&&((W.ACC[person.acc]?.sources||[]).length>1&&(person.ambiguousTeam||!person.shiftsTeamId)||source?.publishing===false)){j.status='Not sent';j.msg='Confirm this source Shifts team before sending. The change is saved in the tool.';return render();}
   if (!DB.on) { j.status = 'Not sent'; j.msg = 'Not signed in to the live database'; return; }
   if (/^timeOffRequests\/(approve|decline)/.test(j.endpoint)) {
     const r = W.REQ.find(x => x.id === j.reqId), a = W.AGI[j.agent], ok = /approve/.test(j.endpoint);
@@ -4587,6 +4606,7 @@ const PUB_RATE = 80;                               // Shifts allows 100 calls/mi
 const pubCalls = p => 9 + 2 * Math.max(1, (p.shifts || []).length);   // get user + list shifts + list groups + delete/create per shift
 const isoZ = x => { const t = Date.parse(x); return isNaN(t) ? '' : new Date(t).toISOString().replace(/\.\d+Z$/, 'Z'); };
 async function pubCall(body) {
+  const person=W.AGI[body.userId]||W.AG.find(a=>a.email&&a.email.toLowerCase()===String(body.email||'').toLowerCase());if(person&&(W.ACC[person.acc]?.sources||[]).length>1&&(person.ambiguousTeam||!person.shiftsTeamId||body.teamId!==person.shiftsTeamId))return {ok:false,b:{error:'Source team must be confirmed before sending'}};
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 150000);
   try { const res = await fetch(CONN.pubUrl, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(body), signal:ctl.signal });
     const tx = await res.text(); let b = {}; try { b = JSON.parse(tx); } catch (e) {}
@@ -4600,7 +4620,7 @@ async function pubLanded(payload) {                // true = Shifts holds exactl
 
 }
 async function dbDryRunJob(j, a) {            // preview only: what Shifts holds now vs what would be sent. Writes nothing.
-  j.status = 'Sending'; render(); const t = W.teamFor(a), teamId = (t && t.teamId) || W.ACC[a.acc].teamId, out = [], lbl = (s, e) => { const x = W.toZoneLocal(a.acc, s), y = W.toZoneLocal(a.acc, e); return `${hm(x[1])}–${hm(y[1])}`; };
+  j.status = 'Sending'; render(); const t = W.teamFor(a), teamId = (t && t.teamId) || W.ACC[a.acc].teamId, out = [], lbl = (s, e) => { const x = W.toZoneLocal(a, s), y = W.toZoneLocal(a, e); return `${hm(x[1])}–${hm(y[1])}`; };
   for (const run of W.dayRuns(j.dates)) {
     const payload = W.publishPayload(a, run, teamId), t0 = Date.now(), r = await pubCall({ ...payload, action:'preview' });
     const span = run.length > 1 ? `${fmtS(run[0])}→${fmtS(run[run.length - 1])}` : fmtS(run[0]);
@@ -4617,6 +4637,7 @@ async function dbDryRunJob(j, a) {            // preview only: what Shifts holds
    or a retry after the flow finished late) is not created twice. The time off covers the whole day and the shift's overnight end. */
 const timeOffReason = (acc, rs) => ((DB.requestReasons || {})[acc] || []).map(r => r.name).find(n => n.trim().toLowerCase() === String(rs).trim().toLowerCase()) || '';
 async function dbTimeOffJob(j, a) {
+  if((W.ACC[a.acc].sources||[]).length>1&&(!a.shiftsTeamId||a.ambiguousTeam)){j.status='Not sent';j.msg='This person belongs to more than one source team or has no confirmed source. Confirm the Shifts team before sending.';render();return;}
   const t = W.teamFor(a), teamId = (t && t.teamId) || W.ACC[a.acc].teamId, iso = ms => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
   const done = (status, msg) => { j.status = status; j.msg = msg; W.audit('Shifts sync', status === 'Confirmed' ? 'Time off sent to Shifts' : 'Time off not sent', `${j.id} · ${a.name}`, j.dates.join(', '), status, msg); render(); };
   if (!a.email) return done('Failed', 'No work email for this person, so Shifts can\'t find them.');
@@ -4626,7 +4647,7 @@ async function dbTimeOffJob(j, a) {
   const rs = days[0].s.absence.reason, reason = timeOffReason(a.acc, rs);
   if (!((DB.requestReasons || {})[a.acc] || []).length) return done('Failed', 'The Teams time-off reasons haven\'t loaded yet. Retry once the schedules finish loading.');
   if (!reason) return done('Failed', `${W.ACC[a.acc].name}'s Shifts team has no time-off reason named "${rs}". Add it in Teams → Shifts → Settings, then retry.`);
-  const items = days.map(({ d, s }) => ({ date:d, startUtc:iso(W.toUtcMs(a.acc, d, s.working ? Math.min(0, s.s) : 0)), endUtc:iso(W.toUtcMs(a.acc, d, s.working ? Math.max(1440, s.e) : 1440)), timeZone:W.zoneOf(a.acc) }));
+  const items = days.map(({ d, s }) => ({ date:d, startUtc:iso(W.toUtcMs(a, d, s.working ? Math.min(0, s.s) : 0)), endUtc:iso(W.toUtcMs(a, d, s.working ? Math.max(1440, s.e) : 1440)), timeZone:W.zoneOf(a) }));
   j.status = 'Sending'; j.msg = 'Checking Shifts for time off already there…'; render();
   const span = [Date.parse(items[0].startUtc) - 3 * 864e5, Date.parse(items[items.length - 1].endUtc) + 3 * 864e5];   // the reader lists time off fully inside its window: ±3 days catches leave entered for several days
   const r = await readerCall({ action:'readteam', teamId, winFrom:iso(span[0]), winTo:iso(span[1]), names:false });
@@ -4652,6 +4673,7 @@ async function dbTimeOffJob(j, a) {
   if (error) console.warn('sync job log', error.message);
 }
 async function dbPublishJob(j, a) {
+  if((W.ACC[a.acc].sources||[]).length>1&&(!a.shiftsTeamId||a.ambiguousTeam)){j.status='Not sent';j.msg='This person belongs to more than one source team or has no confirmed source. Confirm the Shifts team before sending.';render();return;}
   const held = W.swapHolds(a.id, j.dates);   // publishing replaces the shift (new ID) and would break a pending Teams swap/offer on that day
   if (held.length) { const hd = new Set(held.map(h => h.d)), why = held.map(h => `${fmtS(h.d)} (${h.swap}${h.with ? ' with ' + h.with : ''})`).join(', ');
     j.held = held; j.dates = j.dates.filter(d => !hd.has(d));
@@ -4697,7 +4719,7 @@ async function dbPublishJob(j, a) {
 /* days in a run whose shifts in Shifts differ from what the tool would send (null = preview failed: send the whole run) */
 async function pubChangedDays(a, run, teamId) {
   const payload = W.publishPayload(a, run, teamId), r = await pubCall({ ...payload, action:'preview' }); if (!r.ok) return null;
-  const day = iso => W.toZoneLocal(a.acc, iso)[0], have = {}, want = {};
+  const day = iso => W.toZoneLocal(a, iso)[0], have = {}, want = {};
   try {
     (r.b.existingShifts || []).forEach(s => { const sh = s.sharedShift, dr = s.draftShift, x = sh || dr || {};
       const sig = sh && !(dr && W.shiftCoreSignature(dr) !== W.shiftCoreSignature(sh)) ? W.shiftCoreSignature(sh) : 'draft';   // unshared edits → send ours
@@ -4787,6 +4809,10 @@ async function dbLoadTeams(p) {
   try{
    const [cached,feed]=await Promise.all([TEAM_CACHE_ON?DB.sb.from('wft_team_cache').select('payload,captured_at,version').eq('account_id',acc).maybeSingle():Promise.resolve({data:null}),feedRow(acc,true).catch(e=>{console.warn('shifts feed',e.message);return null;})]);
    if(cached.error)DB.cacheError=cached.error.message;else if(cached.data)cached.data.payload=await unpackTeamCache(cached.data.payload);
+   if(!cached.data && (W.ACC[acc].cacheSources||[]).length){
+    const parts=[];for(const source of W.ACC[acc].cacheSources){const r=await DB.sb.from('wft_team_cache').select('payload,version,captured_at').eq('account_id',source.accountId).maybeSingle();if(r.error)throw Error('Could not load original account history');if(r.data){const payload=await unpackTeamCache(r.data.payload);if(Array.isArray(payload?.shifts))parts.push({source,payload});}}
+    if(parts.length)cached.data={payload:W.combineTeamReads(parts),version:1,captured_at:null};
+   }
    const base=cached.data&&cached.data.version===1&&Array.isArray(cached.data.payload?.shifts)?cached.data.payload:null,F=feed&&feed.payload&&Array.isArray(feed.payload.shifts)?feed.payload:null;
    if(!base&&!F){DB.teams[acc]={st:'failed',why:'No Shifts data in Supabase yet. A read was requested; it shows here in about a minute.'};dbFeedNow(acc);return;}
    const J=feedJ(base,F),changes=await dbRestoreTeam(acc,J,P),L=W.LIVE.teams[acc]||{};
@@ -4871,6 +4897,7 @@ async function dbShiftsCheck(accId, J, auto = true, bg = false) {
   if (leave.length) W.audit('Shifts sync', 'Took time off from Shifts', W.ACC[accId].name, '', `${leave.length} person-day${leave.length === 1 ? '' : 's'}`, leave.slice(0, 5).map(x => `${x.a.name} ${x.d} ${x.to}`).join(' · '));
   render();
 }
+
 async function dbLoadAudit() {
   const { data, error } = await DB.sb.from('wft_audit').select('*').order('at', { ascending:false }).limit(1000);
   if (error || !data) return;
@@ -4878,6 +4905,24 @@ async function dbLoadAudit() {
   const have = new Set(W.AUD.filter(x => x.db).map(x => x.db));
   data.reverse().forEach(r => { if (!have.has(r.id)) W.AUD.push({ id:'db' + r.id, db:r.id, at:t(r.at), user:r.user_name || '', module:r.module || '', action:r.action || '', record:r.record || '', before:r.before || '', after:r.after || '', note:(r.note || '') + ' · saved' }); });
 }
+const FLOWLOG={rows:[],state:'Connecting',error:'',channel:null};
+function pFlowEvents(){
+ const rows=FLOWLOG.rows.filter(r=>S.acc==='all'||r.account_id===S.acc).slice(0,50);
+ return `<section class="panel" style="margin-bottom:16px"><div class="panel-h"><div class="grow"><h2>Flow activity</h2><p class="sub">${esc(FLOWLOG.state)} · latest 50 events. Read attempts are saved on the server, even when the tool is closed. Power Automate's internal action history stays in Power Automate.</p></div></div>${FLOWLOG.error?`<p class="note warn">${esc(FLOWLOG.error)}</p>`:''}<div class="tw"><table><thead><tr><th>When</th><th>Account</th><th>Action</th><th>Status</th><th>Duration</th><th>Items</th><th>Run</th><th>Detail</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="num">${esc(new Date(r.at).toLocaleString())}</td><td>${esc(W.ACC[r.account_id]?.name||r.account_id)}</td><td>${esc(r.action)}</td><td>${esc(r.status)}</td><td>${r.duration_ms==null?'—':(r.duration_ms/1000).toFixed(1)+' s'}</td><td>${r.item_count??'—'}</td><td title="${esc(r.run_id)}">${esc(r.run_id.slice(0,8))}</td><td>${esc(r.message||'')}</td></tr>`).join('')||'<tr><td colspan="8">No flow events received yet. New events appear after a refresh from Teams.</td></tr>'}</tbody></table></div></section>`;
+}
+async function dbLoadFlowEvents(){
+ if(!DB.on||!S.auth)return;const {data,error}=await DB.sb.from('wft_flow_events').select('*').order('id',{ascending:false}).limit(200);
+ if(error){FLOWLOG.error='Flow activity could not be loaded. '+error.message;return;}FLOWLOG.error='';FLOWLOG.rows=data||[];
+}
+function flowEventsRender(){if(S.page==='audit'&&!document.activeElement.matches('input,select,textarea'))render();}
+async function dbStartFlowEvents(){
+ if(!DB.on)return;if(FLOWLOG.channel)await DB.sb.removeChannel(FLOWLOG.channel);await dbLoadFlowEvents();
+ FLOWLOG.channel=DB.sb.channel('workforce-flow-events').on('postgres_changes',{event:'INSERT',schema:'public',table:'wft_flow_events'},event=>{
+  const row=event.new;if(!FLOWLOG.rows.some(x=>x.id===row.id)){FLOWLOG.rows.unshift(row);FLOWLOG.rows=FLOWLOG.rows.sort((a,b)=>b.id-a.id).slice(0,200);}flowEventsRender();
+ }).subscribe(status=>{FLOWLOG.state=status==='SUBSCRIBED'?'Live updates':status==='CHANNEL_ERROR'||status==='TIMED_OUT'?'Reconnecting · checking every 15 seconds':'Connecting';if(status==='SUBSCRIBED')dbLoadFlowEvents().then(flowEventsRender);});
+}
+setInterval(()=>{if(DB.on&&S.auth&&S.page==='audit'&&document.visibilityState==='visible')dbLoadFlowEvents().then(flowEventsRender);},15000);
+
 async function dbLoadUsers() {
   const [p, i] = await Promise.all([DB.sb.from('wft_profiles').select('*').order('name'), DB.sb.from('wft_invites').select('*').order('created_at', { ascending:false })]);
   DB.users = { profiles:p.data || [], invites:i.data || [], err:(p.error || i.error || {}).message || '' };
@@ -5193,7 +5238,7 @@ function bPlotSelected() {
   const people=bSelectedPeople(),days=[...document.querySelectorAll('input[name="plotDays"]:checked')].map(el=>el.value),code=$('plotTime').value;
   if(!people.length)return toast('No selected people in this view');if(!days.length)return toast('Choose at least one day');
   const batch=[];let leave=0,past=0,changed=0;
-  people.forEach(a=>days.forEach(d=>{if(d<W.accountClock(a.acc).day){past++;return;}if(bLocked(a,d)){leave++;return;}
+  people.forEach(a=>days.forEach(d=>{if(d<W.accountClock(a).day){past++;return;}if(bLocked(a,d)){leave++;return;}
     const before=batch.length;bSet(batch,a.id,d,code);if(batch.length>before)changed++;
   }));
   bCommit(batch);close();render();toast(`${changed} day${changed===1?'':'s'} added to draft${leave?' · '+leave+' leave days skipped':''}${past?' · '+past+' past days skipped':''}. Review, then publish.`);
@@ -5202,7 +5247,7 @@ function bReviewTable(changes) {
   const time=c=>c==='OFF'?'Off':W.SHIFTS[c]?W.shiftLabel(c):'Unchanged';
   const activities=xs=>(xs||[]).map(x=>`${x[4]||x[2]||'Activity'} ${hm(x[0])}–${hm(x[1])}${x[3]===false?' (unpaid)':''}`).join(' · ')||'No activities';
   const rows=changes.map(c=>{const a=W.AGI[c.id],old=W.sched(a,c.d),now=c.code===undefined?old.code:c.code;
-    return `<tr><td class="nm">${esc(a.name)}<div class="meta">${esc(W.ACC[a.acc].name)} · ${esc(a.station||W.LOB[a.key]?.station||W.LOB[a.key]?.lob||'')}</div></td><td>${esc(fmtD(c.d))}<div class="meta">${esc(W.zoneOf(a.acc))}</div></td><td>${esc(time(old.code))}${c.breaks!==undefined?`<div class="meta">${esc(activities(W.breaksOf(a,c.d,old.code)))}</div>`:''}${c.tag!==undefined?`<div class="meta">${esc(old.absence?.reason||old.rest||(old.code==='OFF'?'Off':'Working day'))}</div>`:''}</td><td>${esc(time(now))}${c.breaks!==undefined?`<div class="meta">${esc(activities(c.breaks))}</div>`:''}${c.tag!==undefined?`<div class="meta">${esc(c.tag||'Working day')}</div>`:''}</td></tr>`;
+    return `<tr><td class="nm">${esc(a.name)}<div class="meta">${esc(W.ACC[a.acc].name)} · ${esc(a.station||W.LOB[a.key]?.station||W.LOB[a.key]?.lob||'')}</div></td><td>${esc(fmtD(c.d))}<div class="meta">${esc(W.zoneOf(a))}</div></td><td>${esc(time(old.code))}${c.breaks!==undefined?`<div class="meta">${esc(activities(W.breaksOf(a,c.d,old.code)))}</div>`:''}${c.tag!==undefined?`<div class="meta">${esc(old.absence?.reason||old.rest||(old.code==='OFF'?'Off':'Working day'))}</div>`:''}</td><td>${esc(time(now))}${c.breaks!==undefined?`<div class="meta">${esc(activities(c.breaks))}</div>`:''}${c.tag!==undefined?`<div class="meta">${esc(c.tag||'Working day')}</div>`:''}</td></tr>`;
   }).join('');
   return `<h3 style="margin:12px 0">Review every changed day</h3><div class="tw" style="max-height:300px;overflow:auto"><table><thead><tr><th>Person / account</th><th>Date / time zone</th><th>Before</th><th>After</th></tr></thead><tbody>${rows}</tbody></table></div><p class="meta">This includes draft changes outside the current filter. Nothing is sent until you confirm below.</p>`;
 }
@@ -5434,7 +5479,7 @@ function planBulkActivities(people,targets,options){
 function bulkActivityPreview(){try{const people=bAgents(),targets=$('bulkScope').value==='selected'?people.filter(a=>B.sel.has(a.id)):people,options={kind:$('bulkKind').value,mode:$('bulkMode').value,minutes:Number($('bulkMinutes').value),count:Number($('bulkCount').value),paid:$('bulkPaid').value,target:Number($('bulkTarget').value)};if(!targets.length)throw Error('No people selected in this filter.');if(!Number.isInteger(options.minutes)||options.minutes<1||options.minutes>180)throw Error('Choose 1–180 whole minutes.');BULK.preview=planBulkActivities(people,targets,options);BULK.inputs=JSON.stringify(options)+$('bulkScope').value;const p=BULK.preview;$('bulkPreview').innerHTML=`<h3>${p.result.length} draft shifts ready</h3><p><b>${p.target}% utilization minimum:</b> ${p.result.length-p.underTarget} meet it; ${p.underTarget} below target. Below-target plans stay available for review; required breaks are never removed automatically.</p><p>${p.unknown.length?'No agreed minimum for '+p.unknown.length+' station(s): evenly spread activities; staffing needs are unconfirmed.':'Compared with saved station references.'} ${p.below?'Review: '+p.below+' station-minutes below the saved minimum. The tool could not keep every interval above it.':''}</p><p>Automatic placement keeps lunch near the shift midpoint and breaks near the quarter points (within 90 minutes), with at least 30 minutes at each shift edge. This is a suggestion, not a guarantee. It uses only people in the current filter; do not narrow employee search if you want the full station comparison.</p>${p.skipped.length?'<p>Skipped: '+p.skipped.map(esc).join('; ')+'</p>':''}<div class="tw" style="max-height:240px"><table><thead><tr><th>Person</th><th>Utilization before → after</th><th>Productive / paid minutes</th><th>Target</th><th>Proposed activities</th></tr></thead><tbody>${p.result.map(x=>`<tr><td>${esc(W.AGI[x.id].name)}</td><td>${x.before.percent==null?'—':x.before.percent.toFixed(1)+'%'} → ${x.utilization.percent==null?'—':x.utilization.percent.toFixed(1)+'%'}</td><td>${x.utilization.productive} / ${x.utilization.paid}</td><td>${x.utilization.meets?'Met':'Below target'}${x.utilization.excess?' · '+Math.ceil(x.utilization.excess)+' paid nonproductive min over budget':''}</td><td>${x.rows.map(r=>esc(r[4]+' '+hm(r[0])+'–'+hm(r[1])+' · '+(r[1]-r[0])+' min · '+(r[3]?'Paid':'Unpaid'))).join('<br>')||'No activities'}</td></tr>`).join('')}</tbody></table></div>`;$('bulkApply').disabled=!p.result.length;}catch(e){BULK.preview=null;$('bulkApply').disabled=true;toast(e.message);}}
 function bulkActivityApply(){try{const p=BULK.preview,options={kind:$('bulkKind').value,mode:$('bulkMode').value,minutes:Number($('bulkMinutes').value),count:Number($('bulkCount').value),paid:$('bulkPaid').value,target:Number($('bulkTarget').value)};if(!p||BULK.inputs!==JSON.stringify(options)+$('bulkScope').value||p.day!==B.gday||p.snapshot!==JSON.stringify(bAgents().map(a=>[a.id,bCode(a,B.gday),gBreaks(a,B.gday)])))throw Error('Settings or schedules changed. Preview again before applying.');const batch=[];p.result.forEach(x=>{const k=bKey(x.id,p.day);batch.push(['b',k,B.brk[k]]);B.brk[k]=x.rows;});bCommit(batch);close();toast(p.result.length+' activity drafts applied. Review before publishing.');render();}catch(e){toast(e.message);}}
 function ganttView(ags) {
-  if (new Set(ags.map(a=>W.zoneOf(a.acc))).size>1) B.tz=0;
+  if (new Set(ags.map(a=>W.zoneOf(a))).size>1) B.tz=0;
   const d = B.gday, iv = gInterval(d, ags), W0 = (GH1 - GH0) * GPX;
   const draftPeople = ags.filter(a => B.draft[bKey(a.id, d)] !== undefined || B.brk[bKey(a.id, d)] !== undefined).length, sched = ags.filter(a => bCode(a, d) !== 'OFF').length;
   const short = iv.filter(x => x.req && x.h < x.req).length;
@@ -5456,7 +5501,7 @@ function ganttView(ags) {
     return `<div class="grow2"><div class="gname"><span class="av" style="width:26px;height:26px;font-size:10px">${initials(a.name)}</span><span class="nm" title="${esc(a.name)} · TL ${esc(a.tl)}">${esc(a.name)}</span><button class="bcopy" data-a="gEdit" data-v="${a.id}" title="Edit shift and activities">Edit</button></div><div class="ghrs num">${hrs}</div>
       <div class="gtrack" data-id="${a.id}" style="width:${W0}px">${bar}</div></div>`;
   };
-  return `<div class="gtop"><select class="in" data-f="gTz" aria-label="Timeline time zone" ${new Set(ags.map(a => W.zoneOf(a.acc))).size > 1 ? 'disabled' : ''} style="width:auto">${TZS.map(([n], i) => `<option value="${i}" ${B.tz === i ? 'selected' : ''}>${i === 0 ? 'Account schedule time · ' + [...new Set(ags.map(a => W.zoneOf(a.acc)))].join(', ') : n}</option>`).join('')}</select>
+  return `<div class="gtop"><select class="in" data-f="gTz" aria-label="Timeline time zone" ${new Set(ags.map(a => W.zoneOf(a))).size > 1 ? 'disabled' : ''} style="width:auto">${TZS.map(([n], i) => `<option value="${i}" ${B.tz === i ? 'selected' : ''}>${i === 0 ? 'Account schedule time · ' + [...new Set(ags.map(a => W.zoneOf(a)))].join(', ') : n}</option>`).join('')}</select>
       <button class="btn sm" data-a="gDay" data-v="-1">‹</button><b class="num">${fmtD(d, { weekday:'long', month:'short', day:'numeric' })}</b><button class="btn sm" data-a="gDay" data-v="1">›</button><button class="btn sm ghost" data-a="gDay" data-v="0">Today</button>
       <span class="pill ${draftPeople ? 'warn' : 'ok'}"><i></i>Published ${ags.length - draftPeople}/${ags.length}</span><button class="btn sm pri" data-a="bulkActivities">Bulk breaks & lunch</button><button class="btn sm" data-a="brPost">💬 Copy breaks for Teams</button><span class="pill ${!iv.every(x=>x.known) ? '' : short ? 'warn' : 'ok'}" ${iv.every(x=>x.known) ? '' : 'title="No station minimum saved in Tool settings, so staffing is not judged"'}>${iv.every(x=>x.known) ? '<i></i>' : ''}${!iv.every(x=>x.known)?'Staffing minimum not set':short?short*15+' min below saved reference':'At or above saved reference'}</span><span class="meta">${sched} scheduled</span>
       <span style="flex:1"></span><span class="glegend"><i class="lg-brk"></i>Break<i class="lg-lun"></i>Lunch<i class="lg-busy"></i>Busy<i class="lg-ooo"></i>Out of office<i class="lg-cl"></i>Closed</span></div>
@@ -5700,7 +5745,7 @@ const A = {
     const stale = [...new Set(ags.map(a => a.acc))].filter(acc => DB.on && (DB.teams[acc] || {}).st !== 'ok');
     if (stale.length) return toast(`Teams has not been read successfully yet for ${stale.map(acc => (W.ACC[acc] || {}).name || acc).join(', ')}. Wait for the load to finish, then send.`);
     const today = {}, held = { teams:0, extra:0, label:0 }, chk = k => ((W.SCHK[W.AGI[k.split('|')[0]].acc] || {}).rows || []).some(r => r.k === k && r.side !== 'tool');
-    const plan = ags.map(a => { const t = today[a.acc] || (today[a.acc] = (() => { try { return W.accountClock(a.acc).day; } catch (e) { return TODAY; } })());   // "today" in the account's own time zone
+    const plan = ags.map(a => { const t = today[a.acc] || (today[a.acc] = (() => { try { return W.accountClock(a).day; } catch (e) { return TODAY; } })());   // "today" in the account's own time zone
       return { a, dates:days.filter(d => { if (d < t) return false; const s = W.sched(a, d); if (!s.working || W.fullOff(s)) return false;
         if (chk(W.kOf(a.id, d))) { held.teams++; return false; }                                   // Teams is newer for this day, or it needs review
         if (s.remoteOT.length || s.remoteExtra.length) { held.extra++; return false; }             // OT or a second shift in Teams would be replaced by one shift
