@@ -1009,10 +1009,12 @@ lockPlan(null, HIST_FROM, PUB.until);
 /* ---------- logins vs schedule ---------- */
 /* the floor's point in time: live = real clock today; otherwise any date + time picked on the Live floor (replay) */
 const WFc = { clock: realMin(), day: TODAY, live: true, zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' };
+const ZONE_CLOCK_FMT={},ZONE_CLOCK_LAST={};
 function clockInZone(zone, ms = Date.now()) {
-  const f = new Intl.DateTimeFormat('en-CA', {timeZone:zone, year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}), p = {};
+  const minute=Math.floor(ms/60000),cached=ZONE_CLOCK_LAST[zone];if(cached?.minute===minute)return {...cached.value};
+  const f = ZONE_CLOCK_FMT[zone]||(ZONE_CLOCK_FMT[zone]=new Intl.DateTimeFormat('en-CA', {timeZone:zone, year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'})), p = {};
   f.formatToParts(new Date(ms)).forEach(x => p[x.type] = x.value);
-  return {day:p.year + '-' + p.month + '-' + p.day, clock:(+p.hour % 24) * 60 + +p.minute};
+  const value={day:p.year + '-' + p.month + '-' + p.day, clock:(+p.hour % 24) * 60 + +p.minute};ZONE_CLOCK_LAST[zone]={minute,value};return {...value};
 }
 function floorInstant() {
   if (WFc.live) return Date.now();
@@ -2566,7 +2568,7 @@ const ICONS = {
 };
 const icon = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k] || '<circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4M12 17h.01"/>'}</svg>`;
 const abTag = r => `<span class="ab ${W.RTYPE[r] === 'unplanned' ? 'un' : 'pl'}" title="${esc(r)}">${W.rcode(r)}</span>`;
-const inScope = id => (!W.LIVE.on || W.LIVE.accs.includes(id)) && (W.ME.scope.includes('all') || W.ME.scope.includes(id));
+const inScope = id => (!W.LIVE.on || W.LIVE.accs.includes(id) || (DB.on && readAccs().includes(id))) && (W.ME.scope.includes('all') || W.ME.scope.includes(id));
 const accOk = a => !a.inactive && inScope(a.acc) && (S.acc === 'all' || a.acc === S.acc) && (S.loc === 'all' || W.locOf(a) === S.loc);
 const lobOk = l => inScope(l.acc) && (S.acc === 'all' || l.acc === S.acc) && (S.loc === 'all' || l.site === S.loc);
 const locList = () => [...new Set(W.LOBS.filter(l => inScope(l.acc) && (S.acc === 'all' || l.acc === S.acc)).map(l => l.site))].sort();
@@ -2836,9 +2838,10 @@ const DATA_PAGES = ['overview','live','schedule','builder','shiftchk','schaudit'
 const waitingAccs = () => W.ACCOUNTS.filter(a => inScope(a.id) && (S.acc === 'all' || S.acc === a.id) && (DB.teams || {})[a.id]?.st === 'loading' && !W.AG.some(x => x.acc === a.id && x.cap));
 const shownAccs = () => W.ACCOUNTS.filter(a => inScope(a.id) && (S.acc === 'all' || S.acc === a.id) && ((DB.teams || {})[a.id] || W.AG.some(x => x.acc === a.id)));
 function loadingGate() {
-  if (!DATA_PAGES.includes(S.page)) return ''; const w = waitingAccs(), all = shownAccs();
+  if (!DATA_PAGES.includes(S.page)) return '';
+  if(DB.on&&S.acc!=='all'&&readAccs().includes(S.acc)&&!W.AG.some(a=>a.acc===S.acc&&a.cap)&&(DB.teams?.[S.acc]?.st==='failed'))return `<section class="panel"><h2>${esc(W.ACC[S.acc].name)} is connected</h2><p>No complete schedule snapshot yet. Combined accounts can take several minutes. Its figures are excluded until that read finishes.</p><p class="note">${esc(DB.teams[S.acc].why||DB.teams[S.acc].feedErr||'Waiting for the first read.')}</p><button class="btn" data-a="go" data-v="audit">Open Flow activity</button><button class="btn" data-a="scheduleRefresh" ${scheduleReadBusy?'disabled':''}>Refresh from Teams</button></section>`; const w = waitingAccs(), all = shownAccs();
   if (!w.length || w.length < all.length) return '';
-  return `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Loading ${esc(w.map(a => a.name).join(', '))} from Teams Shifts…</h2><p class="sub">People, schedules and leave are on their way. This page fills in by itself when they arrive, usually within 2–5 minutes. Nothing is shown until then, so no number here can be mistaken for real data.</p></div><span class="pill info"><i></i>Loading</span></div></section>`;
+  return `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Loading ${esc(w.map(a => a.name).join(', '))} from Teams Shifts…</h2><p class="sub">People, schedules and leave are on their way. This page fills in by itself when they arrive, usually within 2–5 minutes. A combined account with many teams can take longer. Nothing is shown until then, so no number here can be mistaken for real data.</p></div><span class="pill info"><i></i>Loading</span></div></section>`;
 }
 function loadingNote() {
   if (!DATA_PAGES.includes(S.page) || loadingGate()) return ''; const w = waitingAccs();
