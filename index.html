@@ -3072,8 +3072,8 @@ function pSchedule() {
    only on request, to save flow runs) */
 function shiftsReadPill() {
   const ts = W.ACCOUNTS.filter(a => inScope(a.id) && (S.acc === 'all' || a.id === S.acc)).map(a => (DB.teams || {})[a.id] || {});
-  const at = ts.map(t => t.feedAt).filter(Boolean).sort()[0], failed = ts.some(t => t.feedAt && t.feedOk === false);
-  const lbl = scheduleReadBusy ? 'Reading Teams…' : at ? 'Shifts ' + feedAge(at) : ts.some(t => t.st === 'loading') ? 'Shifts loading…' : 'Shifts not read';
+  const at = ts.map(t => t.feedAt).filter(Boolean).sort()[0], failed = ts.some(t => t.feedOk === false);
+  const lbl = scheduleReadBusy ? 'Reading Teams…' : failed ? 'Shifts refresh failed' : at ? 'Shifts ' + feedAge(at) : ts.some(t => t.st === 'loading') ? 'Shifts loading…' : 'Shifts not read';
   return `<button class="clockpill${failed ? ' warn' : ''}" data-a="scheduleRefresh" ${scheduleReadBusy ? 'disabled' : ''} title="Teams Shifts is read only when someone asks. Click to read ${S.acc === 'all' ? 'every account in view' : esc(W.ACC[S.acc].name)} now (one account at a time, under a minute each)." aria-label="${esc(lbl)}. Refresh from Teams"><span aria-hidden="true">↻</span> ${esc(lbl)}</button>`;
 }
 const feedAge = t => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000)); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : durL(m) + ' ago'; };
@@ -3081,11 +3081,11 @@ function scheduleReadStatus() {
  const accs=W.ACCOUNTS.filter(a=>inScope(a.id)&&(S.acc==='all'||a.id===S.acc));
  const st=accs.map(a=>({a,t:(DB.teams||{})[a.id]||{},pend:((W.SCHK[a.id]||{}).rows||[]).filter(r=>r.side!=='shifts').length}));
  const rev=x=>x.pend?` · <b>${x.pend} to review</b>`:'',old=x=>x.t.feedAt&&Date.now()-Date.parse(x.t.feedAt)>30*60000;
- const ok=st.filter(x=>x.t.feedAt&&x.t.feedOk),late=st.filter(x=>x.t.feedAt&&!x.t.feedOk),none=st.filter(x=>!x.t.feedAt);
+ const ok=st.filter(x=>x.t.feedAt&&x.t.feedOk),late=st.filter(x=>x.t.feedOk===false),none=st.filter(x=>!x.t.feedAt&&x.t.feedOk!==false);
  const mode=DB.on?'Teams Shifts is read when someone presses Refresh from Teams':'Sample data';
  return `<section class="srcbar" title="The saved original schedule is kept separately. Unsent tool changes are never overwritten by a Teams read."><span><b>Current schedule</b> · ${mode}</span>`
   +(DB.on&&ok.length?`<span>Read: ${ok.map(x=>`${esc(x.a.name)} ${feedAge(x.t.feedAt)}${rev(x)}`).join(', ')}</span>`:'')
-  +late.map(x=>`<span><span class="pill warn">Last read failed</span> ${esc(x.a.name)}: showing the read from ${feedAge(x.t.feedAt)}${x.t.feedErr?' · '+esc(x.t.feedErr):''}${rev(x)}</span>`).join('')
+  +late.map(x=>`<span><span class="pill warn">Last read failed</span> ${esc(x.a.name)}: ${x.t.feedAt?'showing the read from '+feedAge(x.t.feedAt):'no successful snapshot yet'}${x.t.feedErr?' · '+esc(x.t.feedErr):''}${rev(x)}</span>`).join('')
   +(DB.on&&none.length?`<span>Not read yet: ${none.map(x=>esc(x.a.name)).join(', ')}</span>`:'')
   +`<span class="sp"></span>${DB.on?'':'<span class="meta">Refresh works with live data only</span>'}<button class="btn sm" data-a="scheduleRefresh" ${DB.on&&!scheduleReadBusy?'':'disabled'}>${scheduleReadBusy?'Reading Teams…':'Refresh from Teams'}</button></section>`;
 }
@@ -3100,11 +3100,13 @@ let scheduleReadBusy=false;
 async function refreshScheduleReads(only) {
  if(scheduleReadBusy||!DB.on||!S.auth)return;
  scheduleReadBusy=true;render();
- try{const accs=only?[only]:W.LIVE.accs.filter(inScope).filter(a=>S.acc==='all'||a===S.acc),res=await Promise.all(accs.map(a=>dbFeedNow(a).then(r=>[a,r]))),nm=st=>res.filter(x=>x[1]===st).map(x=>W.ACC[x[0]].name);
+ try{const accs=(only?[only]:readAccs().filter(inScope).filter(a=>S.acc==='all'||a===S.acc)).filter(a=>readAccs().includes(a)&&inScope(a)),before=Object.fromEntries(await Promise.all(accs.map(async a=>[a,await feedRow(a,false).catch(()=>null)]))),res=await Promise.all(accs.map(a=>dbFeedNow(a).then(r=>[a,r]))),nm=st=>res.filter(x=>x[1]===st).map(x=>W.ACC[x[0]].name);
   const started=nm('started'),queued=nm('queued'),busy=nm('busy'),bad=res.filter(x=>!['started','queued','busy'].includes(x[1]));
   toast(started.length||queued.length?[started.length?'Reading '+started.join(', ')+' now':'',queued.length?(started.length?'then ':'Queued: ')+queued.join(', ')+' (the server reads one account at a time, under a minute each)':''].filter(Boolean).join(' · ')+' · this page updates by itself'
    :busy.length?`${busy.join(', ')} ${busy.length===1?'was':'were'} read in the last 2 minutes · the newest read shows here automatically`:'Refresh not available: '+(bad[0]?bad[0][1]:'no accounts'));
-  for(const wait of [20,20,20,30,30,40,40,40,60,60,60]){await new Promise(r=>setTimeout(r,wait*1000));await feedPoll();}
+  const pending=new Set(res.filter(([,r])=>['started','queued','busy'].includes(r)).map(([a])=>a));
+  for(const wait of [5,10,15,20,20,30,30,40,40,60,60,60,60]){if(!pending.size)break;await new Promise(r=>setTimeout(r,wait*1000));await feedPoll([...pending]);
+   for(const a of [...pending]){const f=await feedRow(a,false).catch(()=>null),b=before[a];if(f&&((f.read_at&&f.read_at!==b?.read_at)||(!f.ok&&f.tried_at!==b?.tried_at)))pending.delete(a);}}
  }finally{scheduleReadBusy=false;render();}
 }
 /* 'live' (Who is working now + call-outs) too: time off entered in Shifts during the day shows there without a reload (2026-11-05) */
@@ -4767,7 +4769,9 @@ const histNotice=()=>{const cw=Object.entries(DB.clockWarn||{}).filter(([a])=>S.
 const FEED_SEEN = {}; DB.lastJ = DB.lastJ || {};
 async function feedRow(acc, withPayload) {
  const r = await DB.sb.from('wft_shifts_feed').select(withPayload ? 'payload,read_at,ok,error,tried_at' : 'read_at,ok,error,tried_at').eq('account_id', acc).maybeSingle();
- if (r.error) throw Error(r.error.message); return r.data;
+ if (r.error) throw Error(r.error.message);
+ if (withPayload && r.data?.payload) r.data.payload = await unpackTeamCache(r.data.payload);
+ return r.data;
 }
 /* snapshot ∪ feed, trimmed to 12 weeks; freshFrom = the feed's first read instant, so the two-way check only adopts days this read covered */
 function feedJ(base, F) {
@@ -4797,9 +4801,9 @@ async function dbLoadTeams(p) {
 }
 /* every 60 s on schedule, floor and inbox pages: one tiny read of each feed's time; a newer server read is merged and checked */
 let feedPolling=false;
-async function feedPoll() {
+async function feedPoll(only) {
  if(feedPolling||!DB.on||!S.auth)return;feedPolling=true;
- try{for(const acc of W.LIVE.accs.filter(inScope)){
+ try{for(const acc of W.LIVE.accs.filter(inScope).filter(a=>!only||only.includes(a))){
    const f=await feedRow(acc,false).catch(()=>null);if(!f)continue;
    DB.teams[acc]={...(DB.teams[acc]||{}),feedAt:f.read_at,feedOk:f.ok,feedErr:f.ok?'':f.error||''};
    if(!f.read_at||f.read_at===FEED_SEEN[acc]||!DB.lastJ[acc])continue;
@@ -4912,8 +4916,8 @@ function flowDiagram() {
   return `<svg viewBox="0 0 980 300" width="100%" role="img" aria-label="Data flow between Microsoft Shifts and Teams, Power Automate, the database and the Workforce Tool">
     <defs>${['in', 'out'].map(d => `<marker id="ah-${d}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="fd-ah-${d}"/></marker>`).join('')}</defs>
     ${box(10, 20, 190, 56, 'Microsoft Shifts', 'shifts · time off · swaps', 'ms')}${box(10, 100, 190, 56, 'Microsoft Teams', 'requests · group chats', 'ms')}${box(10, 180, 190, 56, 'SharePoint', 'roster Excel', 'ms')}${box(10, 252, 190, 40, 'ACD / time clock', 'logins', 'ms')}
-    ${box(290, 40, 200, 64, 'Power Automate · IN', '“Crane Shifts → PTO sync” · hourly', 'pa')}${box(290, 196, 200, 64, 'Power Automate · OUT', '“Crane PTO to Shifts” · HTTP trigger', 'pa')}
-    ${box(580, 110, 170, 80, 'Supabase database', 'xrzpbkilkswyflzagcfw', 'db')}${box(820, 110, 150, 80, 'Workforce Tool', 'this app', 'app')}
+    ${box(290, 40, 200, 64, 'Power Automate · READ', 'Teams reader · on request', 'pa')}${box(290, 196, 200, 64, 'Power Automate · OUT', '“Crane PTO to Shifts” · HTTP trigger', 'pa')}
+    ${box(580, 110, 170, 80, 'Supabase database', 'snapshots · schedule changes', 'db')}${box(820, 110, 150, 80, 'Workforce Tool', 'this app', 'app')}
     ${arr(200, 48, 288, 64, '', 'in')}${arr(200, 128, 288, 80, '', 'in')}${arr(200, 208, 288, 100, '', 'in')}${arr(200, 272, 288, 104, '', 'in')}
     ${arr(490, 72, 578, 130, 'writes', 'in')}${arr(750, 140, 818, 140, 'reads', 'in')}
     ${arr(818, 168, 750, 168, 'saves', 'out')}${arr(818, 186, 492, 232, 'calls (action)', 'out')}
@@ -4959,7 +4963,7 @@ function connStatusPanel() {
     ['Database', DB.on ? 'ok' : 'bad', DB.on ? 'Signed in to the Workforce Tool database.' : 'Not connected. Sign in again; if it persists, check the database link below.'],
     ['Shifts reader link (used by the server)', !C.readUrl ? 'bad' : failRead.length ? 'bad' : 'ok', !C.readUrl ? 'No reader link. Paste it in Receiving from Shifts below.' : `${accs.length} account${accs.length === 1 ? '' : 's'} read from Shifts${okRead.length < accs.length ? ` · ${okRead.length} loaded so far` : ''}${failRead.length ? ' · failed: ' + failRead.map(a => W.ACC[a].name + ' (' + ((T[a] || {}).why || '') + ')').join(', ') : ''}.`],
     ['Server reads Shifts (on Refresh from Teams)', DB.feedRows === undefined ? 'warn' : !feed.length ? 'warn' : feed.some(f => !f.ok) || feedMissing.length ? 'warn' : 'ok',
-      DB.feedRows === undefined ? 'Checking…' : DB.feedErr ? 'Not readable: ' + DB.feedErr : feed.map(f => `${(W.ACC[f.account_id] || { name:f.account_id }).name} ${f.ok ? ago(f.read_at) : 'failed: ' + (f.error || '')}`).join(' · ') + (feedMissing.length ? ' · not read yet: ' + feedMissing.map(a => W.ACC[a].name).join(', ') + ' (new accounts join the next round)' : '')],
+      DB.feedRows === undefined ? 'Checking…' : DB.feedErr ? 'Not readable: ' + DB.feedErr : feed.map(f => `${(W.ACC[f.account_id] || { name:f.account_id }).name} ${f.ok ? ago(f.read_at) : 'failed: ' + (f.error || '')}`).join(' · ') + (feedMissing.length ? ' · not read yet: ' + feedMissing.map(a => W.ACC[a].name).join(', ') + ' (use Refresh for that account)' : '')],
     ['Publishing to Shifts', !C.pubUrl ? 'bad' : (P.accounts || []).some(a => W.ACC[a] && !sendState(a).team) ? 'warn' : (P.accounts || []).length ? 'ok' : 'off', !C.pubUrl ? 'No publishing link. Paste it in Sending to Shifts below.' : (P.accounts || []).length ? 'Publishes for ' + P.accounts.filter(a => W.ACC[a]).map(a => { const x = sendState(a); return W.ACC[a].name + (!x.team ? ' (no Shifts team)' : x.mode === 'preview' ? ' (preview only)' : ''); }).join(', ') + '.' + (W.ACCOUNTS.some(a => !P.accounts.includes(a.id)) ? ' Not sending: ' + W.ACCOUNTS.filter(a => !P.accounts.includes(a.id)).map(a => a.name).join(', ') + '.' : '') : 'Link set, but no account publishes yet. Tick accounts in the controls below.'],
     ['Time off to Shifts (PTO flow)', C.flowUrl ? 'ok' : 'warn', C.flowUrl ? 'Approved leave is sent to Shifts.' : 'No PTO flow link: leave stays in the tool only.'],
   ];
@@ -4973,7 +4977,7 @@ function pConnect() {
   ${accountsSetupPanel(ed)}
   <details class="adv" ${S.connAdv ? 'open' : ''} ontoggle="S.connAdv = this.open"><summary>Connection links, database and sending scope (rarely changed)</summary>
   <div class="cols c2">
-    ${C.standalone ? `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">The Shifts reader below reads team members, schedules, time off and time-off requests. The tool reads when you sign in; schedules and requests refresh every minute while their page is open.</p></div></div><p class="note">Use <b>Refresh Teams requests</b> on Review leave requests for an immediate check. Its status shows the last request read or an error. Shift swap requests are not connected yet.</p><button class="btn" data-a="reqRefresh" ${scheduleReadBusy ? 'disabled' : ''}>Refresh Teams requests</button></section>` : `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div class="grow"><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">Flow <b>“Crane Shifts → PTO sync”</b> runs by itself every hour. It reads Shifts and writes into the database; the tool reads the database.</p></div>${dt && dt.sync ? `<span class="pill ok"><i></i>Last sync ${esc(dt.sync.split(' · ')[0])}</span>` : '<span class="pill muted">Last sync: test the database</span>'}</div>
+    ${C.standalone ? `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">The Shifts reader below reads team members, schedules, time off and time-off requests. Sign-in loads saved Supabase snapshots. Refresh from Teams queues a fresh read for the selected account: Supabase → Power Automate → Teams Shifts → Supabase → tool. The queue runs one account at a time; an empty queue does not call the flow.</p></div></div><p class="note">Use the top-bar Refresh button for the account in view. The last successful read stays visible if a refresh fails. Schedules, time off, leave requests and shift swap requests come from the saved feed; refreshing never sends schedule changes back to Teams.</p><button class="btn" data-a="reqRefresh" ${scheduleReadBusy ? 'disabled' : ''}>Refresh Teams requests</button></section>` : `<section class="panel" style="border-top:3px solid var(--acc)"><div class="panel-h"><div class="grow"><div class="kicker">① Receiving · Shifts → tool</div><h2>Receiving from Shifts</h2><p class="sub">Flow <b>“Crane Shifts → PTO sync”</b> runs by itself every hour. It reads Shifts and writes into the database; the tool reads the database.</p></div>${dt && dt.sync ? `<span class="pill ok"><i></i>Last sync ${esc(dt.sync.split(' · ')[0])}</span>` : '<span class="pill muted">Last sync: test the database</span>'}</div>
       <div class="note" style="margin-bottom:10px"><b>No link is needed here for the hourly sync.</b> The link goes the other way, inside the flow: its HTTP step posts to the database address below, with the anon key in the headers (as the live portal does today).</div>
       <div class="field"><label class="f">Database address used by the flow</label><div style="display:flex;gap:6px"><input class="in mono" readonly aria-label="Database address used by the flow" value="${esc(C.dbUrl.replace(/\/+$/, ''))}/rest/v1/rpc/crane_pto_ingest_shifts"><button class="btn sm" data-a="cCopyIn">Copy</button></div></div>
       <div class="field"><label class="f" for="cIn">Sync-now trigger URL (optional)</label><input class="in mono" id="cIn" value="${esc(C.inUrl)}" placeholder="Only if the sync flow also has a “When an HTTP request is received” trigger" ${ed ? '' : 'disabled'}></div>
@@ -4997,10 +5001,10 @@ function pConnect() {
       ${dt ? `<div class="note ${dt.ok ? '' : 'bad'}" style="margin-top:10px">${dt.ok ? `Read-only check at ${esc(dt.at)}:<br>${dt.rows.map(r => `<span class="mono">${esc(r[0])}</span>: ${r[1] == null ? '<span style="color:var(--bad)">not reachable</span>' : r[1].toLocaleString() + ' rows'}`).join(' · ')}${dt.sync ? `<br>Last Shifts sync: <b>${esc(dt.sync)}</b>` : ''}` : esc(dt.msg)}</div>` : ''}
       <p class="foot-note">The test only <b>reads</b> row counts and the last sync status. The prototype screens keep using sample data until the tool is switched over to these tables.</p></section>`}
     <section class="panel"><h2 style="margin-bottom:8px">How the two directions fit</h2><ol style="margin:0;padding-left:18px;line-height:1.75">
-      <li><b>Receiving</b> runs on its own every hour: Shifts → flow → database → tool. Nothing to paste in the tool; the database key goes in the flow's HTTP step.</li>
+      <li><b>Receiving</b> runs when you press Refresh: tool → Supabase queue → reader flow → Teams Shifts → Supabase snapshot → tool. Nothing to paste in the tool; the database key goes in the flow's HTTP step.</li>
       <li><b>Sending</b> happens when you approve or publish: tool → flow trigger URL → Shifts.</li>
-      <li>The next receiving run reads Shifts back, so the tool and Shifts stay in step. A change made directly in Shifts also comes back on the next run.</li>
-      <li>Optional: add an HTTP trigger to the receiving flow and paste it in ① for a <b>Sync now</b> button.</li></ol></section></div>
+      <li>After publishing or changing a schedule in Teams, press Refresh for that account to read it back. The tool shows the last successful read time; it is not a continuous live feed.</li>
+      <li>The minute timer only serves requested accounts. Opening or switching a page reads saved data; it does not start recurring Power Automate reads.</li></ol></section></div>
   ${ed && (DB.on || DEV) ? `<section class="panel" style="margin-top:14px"><div class="panel-h"><div class="grow"><h2>Shifts reader &amp; publishing controls</h2><p class="sub">Links are stored in the database for signed-in staff only, never in the public files. Publishing writes real shifts to Microsoft Shifts, but only for the accounts enabled for publishing ticked here.</p></div></div>
 ${DB.on ? '' : '<div class="note warn" style="margin-bottom:10px"><b>Local test mode:</b> this box is shown for review only. Nothing here is saved or sent.</div>'}
     <div class="cols c2"><div class="field"><label class="f" for="cRead">Reader flow link ("Workforce Tool from Shifts - read team v2")</label><input class="in mono" id="cRead" style="width:100%" placeholder="https://…/triggers/manual/paths/invoke?…" value="${CONN.readUrl ? '•••• saved ••••' : ''}"></div>
