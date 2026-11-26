@@ -3070,7 +3070,7 @@ function pSchedule() {
 function shiftsReadPill() {
   const ts = W.ACCOUNTS.filter(a => inScope(a.id) && (S.acc === 'all' || a.id === S.acc)).map(a => (DB.teams || {})[a.id] || {});
   const at = ts.map(t => t.feedAt).filter(Boolean).sort()[0], failed = ts.some(t => t.feedAt && t.feedOk === false);
-  const lbl = scheduleReadBusy ? 'Reading Teams…' : at ? 'Shifts ' + feedAge(at) : 'Shifts not read';
+  const lbl = scheduleReadBusy ? 'Reading Teams…' : at ? 'Shifts ' + feedAge(at) : ts.some(t => t.st === 'loading') ? 'Shifts loading…' : 'Shifts not read';
   return `<button class="clockpill${failed ? ' warn' : ''}" data-a="scheduleRefresh" ${scheduleReadBusy ? 'disabled' : ''} title="Teams Shifts is read only when someone asks. Click to read ${S.acc === 'all' ? 'every account in view' : esc(W.ACC[S.acc].name)} now (one account at a time, under a minute each)." aria-label="${esc(lbl)}. Refresh from Teams"><span aria-hidden="true">↻</span> ${esc(lbl)}</button>`;
 }
 const feedAge = t => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000)); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : durL(m) + ' ago'; };
