@@ -5143,7 +5143,7 @@ function readLogins(f) {
   rd.readAsArrayBuffer(f);
 }
 /* ---------- SCHEDULE BUILDER (paint, copy, apply patterns, live coverage, draft → publish) ---------- */
-const B = { view:'day', gday:addD(TODAY, 1), tz:0, tags:{}, spans:{}, brk:{}, from:addD(weekStart(TODAY), 7), len:7, lobs:[], tool:null, draft:{}, swp:{}, sw:null, undo:[], redo:[], sel:new Set(), clip:null, q:'', day:null, paint:null, newT:false };
+const B = { view:'week', gday:addD(TODAY, 1), tz:0, tags:{}, spans:{}, brk:{}, from:addD(weekStart(TODAY), 7), len:7, lobs:[], tool:null, draft:{}, swp:{}, sw:null, undo:[], redo:[], sel:new Set(), clip:null, q:'', day:null, paint:null, newT:false };
 function gScroll() { const w = $('gwrap'); if (!w) return; const ags = bAgents(), st = ags.map(a => bCode(a, B.gday)).filter(c => c !== 'OFF').map(c => W.SHIFTS[c].s); if (st.length) w.scrollLeft = Math.max(0, gX(Math.min(...st)) - 60); }
 const shiftHue = c => { const m = W.SHIFTS[c].s % 1440; return m < 420 ? 185 : m < 570 ? 215 : m < 720 ? 245 : m < 1020 ? 275 : 230; };
 const chipStyle = c => c === 'OFF' ? 'background:transparent;color:var(--ink3);box-shadow:inset 0 0 0 1px var(--line2)' : `background:hsl(${shiftHue(c)} 58% ${W.SHIFTS[c].s % 1440 >= 1260 || W.SHIFTS[c].s % 1440 < 300 ? 20 : 28}%);color:#fff`   /* ≥4.5:1 white text for every hue (yellow at 42% was 3.2:1) */;
@@ -5165,6 +5165,44 @@ const bCopySource = (a, d) => { if (!bLocked(a, d)) return bCode(a, d);
   for (let w = 1; w <= 6; w++) { const p = addD(d, -7 * w), c = bCode(a, p); if (!bLocked(a, p) && c !== 'OFF') return c; } return null; };   // leave is only plotted on working days
 const bTemplates = () => Object.keys(W.SHIFTS).filter(k => k !== 'OFF').sort((x, y) => !!W.SHIFTS[y].saved - !!W.SHIFTS[x].saved || (W.SHIFTS[x].s % 1440) - (W.SHIFTS[y].s % 1440) || W.SHIFTS[x].e - W.SHIFTS[y].e);   // saved times first
 const bHrs = c => c === 'OFF' ? 0 : (W.SHIFTS[c].e - W.SHIFTS[c].s) / 60;
+
+/* Scheduler audit 2026-11-27: common times first, every saved time reachable; plotting is explicit and stays in the draft. */
+function bPaletteCodes(tpl, use, limit) {
+  const ranked = tpl.slice().sort((a,b) => (use[b] || 0) - (use[a] || 0) || tpl.indexOf(a) - tpl.indexOf(b));
+  const out = ranked.slice(0,limit); if (tpl.includes(B.tool) && !out.includes(B.tool)) out[out.length ? out.length - 1 : 0] = B.tool;
+  return out;
+}
+function bTimePicker(tpl) {
+  return `<label class="field" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 0"><span class="f">All shift times</span><select class="in" data-f="bTime" aria-label="All shift times" style="width:auto;min-width:180px"><option value="OFF" ${B.tool==='OFF'?'selected':''}>Off</option>${tpl.map(c=>`<option value="${c}" ${B.tool===c?'selected':''}>${esc(W.shiftLabel(c))}${W.SHIFTS[c].saved?' · saved':''}</option>`).join('')}<option value="RESET" ${B.tool==='RESET'?'selected':''}>Reset to saved schedule</option></select><span class="meta">${tpl.length} shift times available · plotting changes the draft only</span></label>`;
+}
+const bSelectedPeople = () => bAgents().filter(a => B.sel.has(a.id));
+function bPlotDrawer() {
+  const people = bSelectedPeople(); if (!people.length) return toast('Tick the people you want to schedule first');
+  const tpl=bTemplates(),code=tpl.includes(B.tool)?B.tool:tpl[0];
+  open('Plot selected days', `<p><b>${people.length} ${people.length===1?'person':'people'}</b> in ${esc(bLobNames().join(', '))}. Changes are added to the draft; review before publishing.</p>
+    <label class="field"><span class="f">Shift time</span><select class="in" id="plotTime" aria-label="Plot shift time"><option value="OFF">Off</option>${tpl.map(c=>`<option value="${c}" ${c===code?'selected':''}>${esc(W.shiftLabel(c))}</option>`).join('')}</select></label>
+    <fieldset style="border:0;padding:0;margin:14px 0"><legend class="f">Days to plot</legend><div style="display:flex;gap:10px;flex-wrap:wrap">${bDays().map(d=>`<label style="display:flex;align-items:center;gap:6px;padding:8px;border:1px solid var(--line);border-radius:8px"><input type="checkbox" name="plotDays" value="${d}" ${dow(d)<5?'checked':''}>${esc(fmtD(d,{weekday:'short',month:'short',day:'numeric'}))}</label>`).join('')}</div></fieldset>
+    <p class="note">Only checked days and selected people in this view change. Existing leave and past dates are skipped. Unchecked days keep their schedule. Breaks follow the selected shift's usual layout; use Day view to adjust them.</p>`,
+    '<button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="bPlotGo">Add to draft</button>');
+}
+function bPlotSelected() {
+  const people=bSelectedPeople(),days=[...document.querySelectorAll('input[name="plotDays"]:checked')].map(el=>el.value),code=$('plotTime').value;
+  if(!people.length)return toast('No selected people in this view');if(!days.length)return toast('Choose at least one day');
+  const batch=[];let leave=0,past=0,changed=0;
+  people.forEach(a=>days.forEach(d=>{if(d<W.accountClock(a.acc).day){past++;return;}if(bLocked(a,d)){leave++;return;}
+    const before=batch.length;bSet(batch,a.id,d,code);if(batch.length>before)changed++;
+  }));
+  bCommit(batch);close();render();toast(`${changed} day${changed===1?'':'s'} added to draft${leave?' · '+leave+' leave days skipped':''}${past?' · '+past+' past days skipped':''}. Review, then publish.`);
+}
+function bReviewTable(changes) {
+  const time=c=>c==='OFF'?'Off':W.SHIFTS[c]?W.shiftLabel(c):'Unchanged';
+  const activities=xs=>(xs||[]).map(x=>`${x[4]||x[2]||'Activity'} ${hm(x[0])}–${hm(x[1])}${x[3]===false?' (unpaid)':''}`).join(' · ')||'No activities';
+  const rows=changes.map(c=>{const a=W.AGI[c.id],old=W.sched(a,c.d),now=c.code===undefined?old.code:c.code;
+    return `<tr><td class="nm">${esc(a.name)}<div class="meta">${esc(W.ACC[a.acc].name)} · ${esc(a.station||W.LOB[a.key]?.station||W.LOB[a.key]?.lob||'')}</div></td><td>${esc(fmtD(c.d))}<div class="meta">${esc(W.zoneOf(a.acc))}</div></td><td>${esc(time(old.code))}${c.breaks!==undefined?`<div class="meta">${esc(activities(W.breaksOf(a,c.d,old.code)))}</div>`:''}${c.tag!==undefined?`<div class="meta">${esc(old.absence?.reason||old.rest||(old.code==='OFF'?'Off':'Working day'))}</div>`:''}</td><td>${esc(time(now))}${c.breaks!==undefined?`<div class="meta">${esc(activities(c.breaks))}</div>`:''}${c.tag!==undefined?`<div class="meta">${esc(c.tag||'Working day')}</div>`:''}</td></tr>`;
+  }).join('');
+  return `<h3 style="margin:12px 0">Review every changed day</h3><div class="tw" style="max-height:300px;overflow:auto"><table><thead><tr><th>Person / account</th><th>Date / time zone</th><th>Before</th><th>After</th></tr></thead><tbody>${rows}</tbody></table></div><p class="meta">This includes draft changes outside the current filter. Nothing is sent until you confirm below.</p>`;
+}
+
 function bChecks(a, ds) {
   const out = [], codes = ds.map(d => bCode(a, d)), hrs = ds.reduce((t,d)=>t+W.activityPaidMin(bCode(a,d),gBreaks(a,d))/60,0);
   ds.forEach((d, i) => { const c1 = bCode(a, addD(d, -1)), c2 = codes[i]; if (c1 !== 'OFF' && c2 !== 'OFF') { const gap = W.SHIFTS[c2].s + 1440 - W.SHIFTS[c1].e; if (gap < 600) out.push(`${(gap / 60).toFixed(1)} h rest before ${fmtS(d)}`); } });
@@ -5181,36 +5219,38 @@ function pBuilder() {
   const lobs = W.LOBS.filter(lobOk); if (!lobs.length) return '<div class="panel empty">No stations in this filter.</div>';
   B.lobs = B.lobs.filter(k => lobs.some(l => l.key === k)); if (!B.lobs.length) B.lobs = [lobs[0].key];
   const ds = bDays(), ags = bAgents(), tpl = bTemplates(), changes = Object.keys(B.draft).length, cv = bCoverage(ds, ags), dsel = cv.find(x => x.d === B.day) || cv[0];
+  const visibleIds = new Set(ags.map(a => a.id)); B.sel = new Set([...B.sel].filter(id => visibleIds.has(id)));
   const use = {}; ags.forEach(a => ds.forEach(d => { const c = bCode(a, d); use[c] = (use[c] || 0) + 1; }));
   if (!B.tool) B.tool = tpl.find(c => use[c]) || tpl[0];
   const chip = (c, i) => `<button class="bchip ${B.tool === c ? 'on' : ''}" data-a="bTool" data-v="${c}" style="${chipStyle(c)}" title="${c === 'OFF' ? 'Rest day' : W.shiftLabel(c) + (W.SHIFTS[c].saved ? ' · saved by ' + esc(W.SHIFTS[c].by || '') : '')} · key ${i}">${c !== 'OFF' && W.SHIFTS[c].saved ? '★ ' : ''}${c === 'OFF' ? 'Off' : W.shiftLabel(c)}<small>${use[c] || ''}</small><kbd>${i}</kbd></button>`;
   const cell = (a, d) => { const s = W.sched(a, d), c = bCode(a, d), dr = B.draft[bKey(a.id, d)] !== undefined, lock = bLocked(a, d);
     return `<td class="bc ${dr ? 'dr' : ''} ${lock ? 'lk' : ''} ${d === TODAY ? 'today' : ''}" role="button" tabindex="0" data-id="${a.id}" data-d="${d}" title="${esc(a.name)} · ${fmtD(d)} · ${c === 'OFF' ? 'Off' + (bReason(a,d) ? '' : ' · no reason recorded') : W.shiftLabel(c)}${lock ? ' · ' + esc(bReason(a,d)) + ' (locked)' : ''}">${lock ? abTag(bReason(a,d)) : `<span class="bs" style="${chipStyle(c)}">${c === 'OFF' ? esc(bReason(a,d)||'Off') : W.shiftShort(c)}</span>${c === 'OFF' ? '' : otTag(a, d)}`}</td>`; };
   const changesAll = new Set([...Object.keys(B.draft), ...Object.keys(B.brk), ...Object.keys(B.tags)]).size;
-  const head = `<div class="head"><div class="grow"><div class="kicker">${B.view === 'day' ? 'Day timeline' : 'Week grid'} · times in ${esc([...new Set(B.lobs.map(k => (W.LOB[k] || {}).acc).filter(Boolean))].map(x => W.ACC[x].name + ' · ' + zoneCity(W.zoneOf(x))).join(' / ') || '')}</div><h1><b>Edit schedules</b></h1><p class="sub">${B.view === 'day' ? 'One day on a timeline: drag shifts and breaks, and watch staffing per 15 minutes.' : 'Pick a shift time, then click or drag across cells to add that shift.'} Changes stay as a draft until you publish.</p></div>
+  const head = `<div class="head"><div class="grow"><div class="kicker">${B.view === 'day' ? 'Day timeline' : 'Week grid'} · times in ${esc([...new Set(B.lobs.map(k => (W.LOB[k] || {}).acc).filter(Boolean))].map(x => W.ACC[x].name + ' · ' + zoneCity(W.zoneOf(x))).join(' / ') || '')}</div><h1><b>Edit schedules</b></h1><p class="sub">${B.view === 'day' ? 'One day on a timeline: drag shifts and breaks, and watch staffing per 15 minutes.' : 'Select people, choose a shift time, then use Plot selected days. Click a cell for detailed editing; Shift-drag paints the chosen time.'} Changes stay as a draft until you publish.</p></div>
     <div class="seg">${[['day','Day'],['week','Week']].map(([k, l]) => `<button class="${B.view === k ? 'on' : ''}" data-a="bView" data-v="${k}">${l}</button>`).join('')}</div>
-    ${stationPick('builder', lobs)}<input class="in" id="bQ" data-f="bQ" placeholder="Find employee" value="${esc(B.q)}" style="width:170px"><button class="btn pri" data-a="bPublish" ${changesAll ? '' : 'disabled title="Edit a shift, break or reason first; changes stay a draft until you publish"'}>${changesAll ? 'Publish ' + changesAll : 'Nothing to publish'}</button></div>`;
-  if (B.view === 'day') return head + `<section class="panel bpal"><div class="kicker" style="margin-bottom:6px">Shift for double-click</div><div class="bchips">${tpl.slice(0, 14).map((c, i) => chip(c, i + 1 < 10 ? i + 1 : '')).join('')}</div></section><section class="panel" style="padding:12px">${ganttView(ags)}</section>` + barHtml(changesAll);
+    ${stationPick('builder', lobs)}<input class="in" id="bQ" data-f="bQ" placeholder="Find employee" aria-label="Find employee" value="${esc(B.q)}" style="width:170px"><button class="btn pri" data-a="bPublish" ${changesAll ? '' : 'disabled title="Edit a shift, break or reason first; changes stay a draft until you publish"'}>${changesAll ? 'Publish ' + changesAll : 'Nothing to publish'}</button></div>`;
+  if (B.view === 'day') return head + `<section class="panel bpal"><div class="kicker" style="margin-bottom:6px">Shift for double-click</div><div class="bchips">${bPaletteCodes(tpl, use, 8).map(c => chip(c, tpl.indexOf(c) < 9 ? tpl.indexOf(c) + 1 : '')).join('')}</div>${bTimePicker(tpl)}</section><section class="panel" style="padding:12px">${ganttView(ags)}</section>` + barHtml(changesAll);
   return head + `<div class="head" style="margin-top:-8px">
     <div class="grow"></div><div class="seg">${[[7,'1 week'],[14,'2 weeks']].map(([k, l]) => `<button class="${B.len === k ? 'on' : ''}" data-a="bLen" data-v="${k}">${l}</button>`).join('')}</div>
     <button class="btn sm" data-a="bFrom" data-v="-7">←</button><span class="num" style="min-width:120px;text-align:center">${fmtS(ds[0])} – ${fmtS(ds[ds.length - 1])}</span><button class="btn sm" data-a="bFrom" data-v="7">→</button></div>
-  <section class="panel bpal"><div class="kicker" style="margin-bottom:6px">Shift palette <span class="meta" style="text-transform:none;letter-spacing:0">· click a day to edit its reason and time; Shift-drag to paint · numbers = how many cells use it this period</span></div>
-    <div class="bchips">${chip('OFF', 0)}${tpl.slice(0, 18).map((c, i) => chip(c, i + 1 < 10 ? i + 1 : '')).join('')}
+  <section class="panel bpal"><div class="kicker" style="margin-bottom:6px">Shift palette · most used in this view <span class="meta" style="text-transform:none;letter-spacing:0">· click a day to edit its reason and time; Shift-drag to paint · numbers = how many cells use it this period</span></div>
+    <div class="bchips">${chip('OFF', 0)}${bPaletteCodes(tpl, use, 8).map(c => chip(c, tpl.indexOf(c) < 9 ? tpl.indexOf(c) + 1 : '')).join('')}
       <button class="bchip ${B.tool === 'RESET' ? 'on' : ''}" data-a="bTool" data-v="RESET" title="Back to the captured / pattern shift">↺ Reset<kbd>R</kbd></button>
-      ${B.newT ? `<span class="bnew"><input class="in" type="time" id="bNs" value="07:00"><input class="in" type="time" id="bNe" value="16:00"><button class="btn sm pri" data-a="bNewSave">Add</button><button class="btn sm ghost" data-a="bNewT">✕</button></span>` : '<button class="bchip" data-a="bNewT">+ New time</button>'}</div></section>
+      ${B.newT ? `<span class="bnew"><input class="in" type="time" id="bNs" value="07:00"><input class="in" type="time" id="bNe" value="16:00"><button class="btn sm pri" data-a="bNewSave">Add</button><button class="btn sm ghost" data-a="bNewT">✕</button></span>` : '<button class="bchip" data-a="bNewT">+ New time</button>'}</div>${bTimePicker(tpl)}</section>
   <section class="panel" style="margin-bottom:12px"><div class="bcov">${cv.map(x => `<button class="bday ${x.d === dsel.d ? 'on' : ''} ${x.req && x.n < x.req ? 'short' : x.req && x.n < x.req + 2 ? 'tight' : 'ok'}" data-a="bDay" data-v="${x.d}"><span>${W.DOW[dow(x.d)]} ${W.parse(x.d).getDate()}</span><b>${x.n}<small>/${x.req || '–'}</small></b></button>`).join('')}</div>
     <details style="margin-top:8px" ${S.bHours ? 'open' : ''} ontoggle="S.bHours = this.open"><summary class="meta" style="cursor:pointer">Scheduled people by hour · ${fmtD(dsel.d)} · ${dsel.hr.filter((n, i) => dsel.open[i] && n < dsel.minInt).length ? `<span style="color:var(--warn)">${dsel.hr.filter((n, i) => dsel.open[i] && n < dsel.minInt).length} hours below the configured reference of ${dsel.minInt} (not volume based)</span>` : `every open hour at or above the configured reference of ${dsel.minInt}`} · click to ${S.bHours ? 'hide' : 'show'}</summary>${W.ui.hours(dsel.hr, dsel.open, dsel.minInt)}</details></section>
-  <div class="btool"><label class="nowrap"><input type="checkbox" data-a="bSelAll" ${ags.length && ags.every(a => B.sel.has(a.id)) ? 'checked' : ''}> All</label><span class="meta">${B.sel.size} selected</span>
+  <div class="btool"><label class="nowrap"><input type="checkbox" data-a="bSelAll" ${ags.length && ags.every(a => B.sel.has(a.id)) ? 'checked' : ''}> All</label><span class="meta">${B.sel.size} selected in this view</span><button class="btn sm pri" data-a="bPlot" ${B.sel.size ? '' : 'disabled title="Tick people in the grid first"'}>Plot selected days</button>
     <button class="btn sm" data-a="bCopyWeek" title="Copy the previous ${B.len === 7 ? 'week' : '2 weeks'} into this period for ${B.sel.size ? 'the selected people' : 'everyone shown'}">⧉ Copy previous ${B.len === 7 ? 'week' : '2 weeks'}</button>
     <button class="btn sm" data-a="bSendWeek" title="Send every working day shown, from today on, to Teams Shifts for ${B.sel.size ? 'the selected people' : 'everyone shown'}, even days the tool already shows">⇪ Send ${B.len === 7 ? 'week' : '2 weeks'} to Teams</button>
+    </div><details class="how" style="margin:0 0 10px"><summary>More weekly tools · patterns, copy / paste, swap and off days</summary><div class="btool" style="margin-top:8px">
     <select class="in" id="bPat" style="width:auto" aria-label="Pattern">${Object.entries(W.PATTERNS).filter(([, p]) => !p.none).map(([k, p]) => `<option value="${k}">${esc(p.name)}</option>`).join('')}</select><button class="btn sm" data-a="bApplyPat" ${B.sel.size ? '' : 'disabled'}>Apply pattern to selected</button>
     ${B.clip ? `<button class="btn sm pri" data-a="bPaste" ${B.sel.size ? '' : 'disabled'}>Paste ${esc(B.clip.name.split(' ')[0])}'s row to ${B.sel.size || '…'} selected</button>` : '<span class="meta">Tip: point at a row and press Ctrl+C, then Ctrl+V on another row or on ticked people. Rows from Excel paste too.</span>'}
     <button class="btn sm" data-a="bSwap" ${B.sel.size ? '' : 'disabled'} title="Tick 2 people to swap their schedules, or tick anyone to swap this week with next week">⇄ Swap</button>
     <button class="btn sm" data-a="bClear" ${B.sel.size ? '' : 'disabled'}>Set selected to Off</button>
-    <span style="flex:1"></span></div>
+    <span style="flex:1"></span></div></details>
   <section class="panel" style="padding:0"><div class="tw" id="bgrid" style="max-height:600px"><table class="btab"><thead><tr><th class="bn">Agent · ${ags.length}</th>${ds.map(d => `<th class="${d === TODAY ? 'today' : ''}">${W.DOW[dow(d)]}<span>${W.parse(d).getDate()}</span></th>`).join('')}<th>Paid hours</th><th>Shifts / off</th><th>Checks</th></tr></thead><tbody>
-    ${ags.map((a, i) => { const k = bChecks(a, ds); return bGroupHead(ags, i, ds.length + 4) + `<tr class="${B.sel.has(a.id) ? 'rsel' : ''}"><td class="bn"><label><input type="checkbox" data-a="bSel" data-v="${a.id}" ${B.sel.has(a.id) ? 'checked' : ''}><span class="nm">${esc(a.name)}</span></label><button class="bcopy" data-a="bCopyRow" data-v="${a.id}" title="Copy this row">⧉</button>${B.clip && B.clip.id !== a.id ? `<button class="bcopy" data-a="bPasteOne" data-v="${a.id}" title="Paste ${esc(B.clip.name)}'s row here">⤓</button>` : ''}</td>
-      ${ds.map(d => cell(a, d)).join('')}<td class="n num">${k.hrs.toFixed(1)}</td><td class="n num">${k.shifts} / ${k.off}</td><td>${k.warn.length ? `<span class="pill bad" title="${esc(k.warn.join(' · '))}">⚠ ${k.warn.length}</span>` : '<span class="pill ok">✓</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${ds.length + 4}"><div class="empty">No active people in this station.</div></td></tr>`}
+    ${ags.map((a, i) => { const k = bChecks(a, ds); return bGroupHead(ags, i, ds.length + 4) + `<tr class="${B.sel.has(a.id) ? 'rsel' : ''}"><td class="bn"><label><input type="checkbox" data-a="bSel" data-v="${a.id}" ${B.sel.has(a.id) ? 'checked' : ''}><span class="nm">${esc(a.name)}</span></label><button class="bcopy" data-a="bCopyRow" data-v="${a.id}" title="Copy this row" aria-label="Copy ${esc(a.name)} schedule">⧉</button>${B.clip && B.clip.id !== a.id ? `<button class="bcopy" data-a="bPasteOne" data-v="${a.id}" title="Paste ${esc(B.clip.name)}'s row here">⤓</button>` : ''}</td>
+      ${ds.map(d => cell(a, d)).join('')}<td class="n num">${k.hrs.toFixed(1)}</td><td class="n num">${k.shifts} / ${k.off}</td><td>${!k.shifts ? '<span class="pill muted" title="No working shifts in this period. Check that rest days or leave are intended.">No working shifts</span>' : k.warn.length ? `<span class="pill bad" title="${esc(k.warn.join(' · '))}">⚠ ${k.warn.length}</span>` : '<span class="pill ok">✓</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${ds.length + 4}"><div class="empty">No active people in this station.</div></td></tr>`}
   </tbody></table></div></section>
   ${barHtml(changesAll)}
   <details class="how" style="margin-top:10px"><summary>Keys and editing tips</summary><p class="foot-note">Keys: 1–9 pick a shift · 0 Off · R Reset · ⌘/Ctrl+C copy the row you point at · ⌘/Ctrl+V paste it (ticked people or the row you point at; Excel rows start at the cell you point at) · ⌘/Ctrl+Z undo · ⌘/Ctrl+Shift+Z redo. ★ = a saved shift time. Click any day, including leave or Off, to edit its reason and time. Shift-drag paints shifts; leave is protected from painting. Checks: under 10 h rest, more than 6 days in a row, more than 48 h a week.</p></details>`;
@@ -5239,7 +5279,7 @@ function bKeepDraft() {
 }
 function bRestoreDraft() {
   if (B.restored) return; let o = null; try { o = JSON.parse(localStorage.getItem(DRAFT_KEY()) || 'null'); } catch (e) {}
-  if (!o || Date.now() - new Date(o.at) > 14 * 864e5) return; if (Object.keys(B.draft).length || Object.keys(B.brk).length) return;
+  if (!o || Date.now() - new Date(o.at) > 14 * 864e5) { B.restored = true; return; } if (Object.keys(B.draft).length || Object.keys(B.brk).length) return;
   B.restored = true; const left = { draft:{}, brk:{}, tags:{}, spans:{}, times:o.times || {} }; let n = 0;
   const keys = new Set([...Object.keys(o.draft || {}), ...Object.keys(o.brk || {}), ...Object.keys(o.tags || {})]);
   keys.forEach(k => { const [id, d] = k.split('|'); if (d < TODAY) return;
@@ -5636,6 +5676,8 @@ const A = {
   geRemove:el=>{readActivityEditor();GED.rows.splice(+el.dataset.v,1);redrawActivityEditor();},
   geTen:()=>{readActivityEditor();GED.rows.forEach(b=>{if(b[2]==='break')b[1]=b[0]+10;});redrawActivityEditor();},
   geSpread:()=>{try{const offset=Number($('geStagger').value);readActivityEditor();if(!Number.isInteger(offset)||offset<0||offset>30)throw Error('Stagger must be 0–30 whole minutes.');if([...B.sel].some(id=>!W.AGI[id]||!accOk(W.AGI[id])||!B.lobs.includes(W.AGI[id].key)))throw Error('Select people again within the current account and station filter.');const changes=[...B.sel].map((id,i)=>{const a=W.AGI[id],code=bCode(a,GED.day);if(code==='OFF')throw Error(a.name+' has no shift that day.');const rows=GED.rows.map(b=>[b[0]-GED.s+W.SHIFTS[code].s+(i%4)*offset,b[1]-GED.s+W.SHIFTS[code].s+(i%4)*offset,...b.slice(2)]);return {id,code,rows:W.validateActivities(rows,code)};});const batch=[];changes.forEach(x=>{const k=bKey(x.id,GED.day);batch.push(['b',k,B.brk[k]]);B.brk[k]=x.rows;});B.undo.push(batch);B.redo=[];close();toast('Activity pattern applied to '+changes.length+' draft shifts.');render();}catch(e){toast(e.message);}},
+  bPlot: () => bPlotDrawer(),
+  bPlotGo: () => bPlotSelected(),
   bTool: el => { B.tool = el.dataset.v; render(); },
   bLen: el => { B.len = +el.dataset.v; render(); },
   bFrom: el => { B.from = addD(B.from, +el.dataset.v); render(); },
@@ -5685,18 +5727,18 @@ const A = {
   bClear: () => { const b = []; B.sel.forEach(id => bDays().forEach(d => bSet(b, id, d, 'OFF'))); bCommit(b); render(); },
   bUndo: () => { const b = B.undo.pop(); if (!b) return; B.redo.push(bApply(b)); render(); },
   bRedo: () => { const b = B.redo.pop(); if (!b) return; B.undo.push(bApply(b)); render(); },
-  bDiscard: () => { const n = Object.keys(B.draft).length + Object.keys(B.brk).length; if (n && !confirm(`Discard ${n} unpublished change${n === 1 ? '' : 's'}? This cannot be undone.`)) return; B.draftLeft = null; B.draft = {}; B.brk = {}; B.tags = {}; B.spans={}; B.undo = []; B.redo = []; toast('Draft discarded'); render(); },
+  bDiscard: () => { const n = bChanges().length; if (n && !confirm(`Discard ${n} unpublished change${n === 1 ? '' : 's'}? This cannot be undone.`)) return; B.draftLeft = null; B.restored = true; localStorage.removeItem(DRAFT_KEY()); B.draft = {}; B.brk = {}; B.tags = {}; B.spans={}; B.swp={}; B.undo = []; B.redo = []; toast('Draft discarded'); render(); },
   bNewT: () => { B.newT = !B.newT; render(); },
   bNewSave: () => { const t = v => { const [h, m] = v.split(':').map(Number); return h * 60 + m; }; if (!$('bNs').value || !$('bNe').value || $('bNs').value === $('bNe').value) return toast('Set a start and an end time');
     const code = W.saveTemplate(t($('bNs').value), t($('bNe').value)); B.tool = code; B.newT = false; toast(`${W.shiftLabel(code)} saved${DB.on ? ' for everyone' : ''} · ★ in the palette`); render(); },
-  bPublish: () => { const ch = bChanges();
+  bPublish: () => { const ch = bChanges(); if (!ch.length) return toast('No draft changes to review');
     const tagWarning=ch.some(c=>c.tag!==undefined)?'<p class="note">Day status / absence tags will be saved in this tool only. Teams time-off creation is not connected. Record the same reason in Teams separately.</p>':'';
     const ppl = new Set(ch.map(c => c.id)), warn = [...ppl].map(id => W.AGI[id]).filter(a => bChecks(a, bDays()).warn.length);
     open('Publish to Shifts?', `<p><b>${ch.length}</b> shift change${ch.length > 1 ? 's' : ''} for <b>${ppl.size}</b> ${ppl.size > 1 ? 'people' : 'person'} in ${esc([...new Set([...ppl].map(id => lobName(W.AGI[id].key)))].slice(0, 4).join(', '))}${new Set([...ppl].map(id => W.AGI[id].key)).size > 4 ? '…' : ''}.</p>
       ${ch.length ? `<div class="cols c2"><div class="field"><label class="f" for="pubR">Reason for the change <span style="color:var(--bad)">*</span></label><select class="in" id="pubR" style="width:100%"><option value="">Choose a reason…</option>${W.CHANGE_REASONS.map(r => `<option ${(ch.some(c => c.swap) ? r === 'Shift swap' : lastWhy().reason === r) ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></div>
         <div class="field"><label class="f" for="pubM">Remark</label><input class="in" id="pubM" style="width:100%" placeholder="e.g. Volume spike on Monday, approved by OM" value="${ch.some(c => c.swap) ? '' : esc(lastWhy().remark || '')}"></div></div><p class="meta" style="margin:-4px 0 10px">Saved with each changed day and shown in <b>Schedule changes</b>.${lastWhy().reason ? ' Pre-filled with your last reason and remark; change them if this one is different.' : ''}</p>
         <div class="field" style="display:none"><label class="f" for="pubN">Internal note <span class="meta">(optional · added to every changed shift; the agent and team see it)</span></label><input class="in" id="pubN" maxlength="500" style="width:100%" placeholder="e.g. Temporary change for peak week"></div>` : ''}
-      ${tagWarning}${DB.on ? gateSummary(ch.filter(c=>c.tag===undefined).map(c => c.id)) : ''}
+      ${bReviewTable(ch)}${tagWarning}${DB.on ? gateSummary(ch.filter(c=>c.tag===undefined).map(c => c.id)) : ''}
       ${warn.length ? `<div class="note warn" style="margin-bottom:10px">${warn.length} with warnings: ${warn.slice(0, 6).map(a => esc(a.name) + ' (' + esc(bChecks(a, bDays()).warn.join(', ')) + ')').join('; ')}${warn.length > 6 ? '…' : ''}</div>` : '<div class="note" style="margin-bottom:10px">✓ No rest, days-in-a-row or hours warnings.</div>'}
       <div class="note"><b>Teams label:</b> Working day.<br><b>Shift notes:</b> each person’s scheduled start–end times (for example 08:00–16:30).<br><b>Activities:</b> breaks, lunch and other activities, with exact times and paid/unpaid flags. Activity-only changes also update the shift. The publishing connection must be updated first. Older connections are blocked before changes are sent.</div>
       <p class="meta">Each person gets one update in Shifts. Every change, including break moves, is written to the audit trail.</p>`,
@@ -6027,6 +6069,7 @@ document.addEventListener('input', e => { const k = e.target.dataset.f;
   else if (k === 'rsQ') { S.rs.q = e.target.value; S.rs.page = 0; render(); }
   else if (k === 'pvQ') { S.pv.q = e.target.value; S.pv.page = 0; render(); }
   else if (k === 'chkQ') { S.chk.q = e.target.value; S.chk.page = 0; render(); }
+  else if (k === 'bTime') { B.tool = e.target.value; render(); }
   else if (k === 'bQ') { B.q = e.target.value; render(); }
   else if (k === 'wi' && e.target.type === 'range') { readWI(); render(); } });
 document.addEventListener('change', e => { const k = e.target.dataset.f, v = e.target.value;
