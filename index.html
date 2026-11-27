@@ -2017,8 +2017,16 @@ function syncShiftsLeave(accId, J, from, to) {
   const R = readTeamShifts(accId, J, stOf), tags = readTeamLeave(accId, J, stOf, R), out = [], sig = x => x ? [x.reason, x.mins || '', JSON.stringify(x.win || '')].join('|') : '';
   AG.filter(a => a.acc === accId && a.live && !a.inactive && stOf[a.id]).forEach(a => range(from, to).forEach(d => {
     const k = kOf(a.id, d), o = OV[k] || {}, t = tags[k], want = t && !t.rest ? t.absence : null, cur = o.absence || null;
-    if (!want || o.rest || (cur && cur.source !== 'Shifts') || (o.at > 0 && !o.fromShifts) || sig(cur) === sig(want) || !sched(a, d).working) return;
-    (OV[k] = OV[k] || {}).absence = want; out.push({ a, d, from: cur ? cur.reason : '', to: want.reason });
+    if (!want || (o.rest && o.restSrc !== 'Shifts') || (cur && cur.source !== 'Shifts') || (o.at > 0 && !o.fromShifts)) return;
+    const current=sched(a,d), sourceCode=(R.codes[a.id]||{})[d];
+    // A copied Off day can hide a newly imported absence. Restore the source
+    // shift only for an unedited/source-owned day; a person's saved edit wins.
+    const restore=!current.working && sourceCode && sourceCode!=='OFF' && (o.fromShifts || !(o.at>0));
+    if (!current.working && !restore) return;
+    if (!restore && sig(cur)===sig(want)) return;
+    const next=OV[k]=OV[k]||{};
+    if(restore){next.code=sourceCode;next.fromShifts=true;next.at=0;delete next.rest;}
+    next.absence = want; out.push({ a, d, from: cur ? cur.reason : '', to: want.reason });
   }));
   if (out.length) emit();
   return out;
@@ -2183,7 +2191,12 @@ function applySavedDays(rows) {
     if(r.off && RCFG[r.absence_reason]?.rest) {o.rest=r.absence_reason;delete o.absence;} else if (r.absence_reason) o.absence = { reason: r.absence_reason, remark: r.absence_remark || '', source: r.absence_source || 'Workforce Tool', fullDay:r.absence_source==='Workforce Tool · whole day', mins:o.absence && o.absence.reason === r.absence_reason ? o.absence.mins : undefined, by: r.updated_by || '', at: String(r.updated_at || '').slice(0, 16).replace('T', ' ') }; else delete o.absence;
     if(!r.off || !RCFG[r.absence_reason]?.rest)delete o.rest;
     if (r.shift_note) o.shiftNote = r.shift_note; else delete o.shiftNote;
-    if (tag) { if (tag.rest) { o.code = 'OFF'; o.rest = tag.rest; o.restSrc = 'Shifts'; o.restStart = tag.restStart; o.restEnd = tag.restEnd; delete o.absence; } else if (tag.absence) o.absence = tag.absence; else if (o.absence && o.absence.source === 'Shifts') delete o.absence; }
+    if (tag) { if (tag.rest) { o.code = 'OFF'; o.rest = tag.rest; o.restSrc = 'Shifts'; o.restStart = tag.restStart; o.restEnd = tag.restEnd; delete o.absence; } else if (tag.absence) {
+      o.absence = tag.absence;
+      // sched() intentionally hides absence tags on OFF. Do not let an old
+      // Shifts copy turn the fresh source shift + medical/other leave into Off.
+      const fresh=baseCode(a,r.d);if(r.off && fresh!=='OFF'){o.code=fresh;delete o.rest;}
+    } else if (o.absence && o.absence.source === 'Shifts') delete o.absence; }
     if (r.remark) o.remark = r.remark; if (r.breaks) { o.breaks = r.breaks; o.breaksFor = o.code || baseCode(a, r.d); if (r.updated_by === 'Shifts') o.breaksSrc = 'Shifts'; else delete o.breaksSrc; } o.fromShifts = r.updated_by === 'Shifts'; o.at = o.fromShifts ? 0 : Date.parse(r.updated_at) || 0; if(o.fromShifts) PUBOK[kOf(a.id,r.d)] = Date.now(); n++; });
   emit(); return n;
 }
