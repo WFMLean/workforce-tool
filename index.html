@@ -2440,7 +2440,7 @@ function leaderIds() { const ids = supervisorIds(); teamLeadIds().forEach(id => 
 const agentsIn = f => { const sup = f.noSup ? leaderIds() : null;   // noSup: leave supervisors and team leads out
   return AG.filter(a => !a.inactive && (LOCF.v === 'all' || locOf(a) === LOCF.v) && (!f.acc || f.acc === 'all' || a.acc === f.acc) && (!f.lob || f.lob === 'all' || a.key === f.lob) && (!f.keys || f.keys.has(a.key)) && (!sup || !sup.has(a.id))); };
 function absStats(f) {
-  const days = range(f.from, f.to > TODAY ? TODAY : f.to), ags = agentsIn({ ...f, noSup:f.noSup !== false });   // ABS never counts supervisors or team leads
+  const days = range(f.from, f.to > TODAY ? TODAY : f.to), ags = agentsIn({ ...f, noSup:true });   // ABS never counts supervisors or team leads
   const z = () => ({ sched: 0, pl: 0, un: 0, uc: 0, schedM: 0, plM: 0, unM: 0, ucM: 0, partM: 0, partUnknown: 0 });
   const T = { ...z(), outDays: 0 }, byR = {}, byW = {}, byDow = DOW.map(z), byAcc = {}, byLob = {}, byAg = [], byTL = {}, outW = {}, byDay = {};
   const b = (o, k) => o[k] || (o[k] = { k, ...z() });
