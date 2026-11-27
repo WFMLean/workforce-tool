@@ -1945,9 +1945,11 @@ function readTeamLeave(accId, J, stOf, R) {
       days.push(d);
       if(RCFG[rs].rest){(rest[t.userId]=rest[t.userId]||{})[d]=rs;leaveDays.push({id:t.userId,d,rs,s:d===first?m:0,e:d===endDay?endMin:1440});return;}
       if(!(codes[t.userId]||{})[d]){const u=usual[t.userId],wd=dow(d);
-        if(u?u.dows?!u.dows[wd]:wd>4:wd>4)return;                     // not a normal working day for this person: stays Off
+        const explicitTimed=first===endDay && endMin>m && endMin-m<=960;
+        // Preserve explicit timed Shifts leave even when inferred workdays omit this date.
+        if(!explicitTimed && (u?u.dows?!u.dows[wd]:wd>4:wd>4))return;
         if(!(from<dayMin(d,u?u.e:960)&&to>dayMin(d,u?u.s:480)))return;   // leave outside the usual hours (00:00–02:00 inside last night's shift) plots no shift
-        (codes[t.userId]=codes[t.userId]||{})[d]=ensureTemplate(u?u.s:480,u?u.e:960,'Shifts leave');}
+        (codes[t.userId]=codes[t.userId]||{})[d]=ensureTemplate(explicitTimed?m:u?u.s:480,explicitTimed?endMin:u?u.e:960,'Shifts leave');}
       leaveDays.push({id:t.userId,d,rs,from,to});
     });
   });
