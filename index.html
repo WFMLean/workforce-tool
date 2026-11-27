@@ -3131,7 +3131,7 @@ async function refreshScheduleReads(only) {
  }finally{scheduleReadBusy=false;render();}
 }
 /* 'live' (Who is working now + call-outs) too: time off entered in Shifts during the day shows there without a reload (2026-11-05) */
-setInterval(()=>{if(['schedule','planvs','shiftchk','builder','requests','swaps','live'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))feedPoll();},60000);
+setInterval(()=>{if(['overview','roster','schedule','planvs','shiftchk','builder','requests','swaps','live'].includes(S.page)&&document.visibilityState==='visible'&&!Object.keys(B.draft).length&&!Object.keys(B.brk).length&&!document.activeElement.matches('input,select,textarea')&&!$('drawer').classList.contains('on'))feedPoll();},60000);
 
 /* OT tag beside a shift: hours of overtime that day (OT shifts from Teams, or an OT / Overtime activity) */
 const otText = m => m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ' ' + m % 60 + 'm' : ''}` : `${m}m`;
@@ -4827,7 +4827,7 @@ async function dbLoadTeams(p) {
    }
    if(cached.data?.payload)cached.data.payload=await dbScopeTeamPeople(acc,cached.data.payload);
    const base=cached.data&&cached.data.version===1&&Array.isArray(cached.data.payload?.shifts)?cached.data.payload:null,F=feed&&feed.payload&&Array.isArray(feed.payload.shifts)?feed.payload:null;
-   if(!base&&!F){DB.teams[acc]={st:'failed',why:'No Shifts data in Supabase yet. A read was requested; it shows here in about a minute.'};dbFeedNow(acc);return;}
+   if(!base&&!F){DB.teams[acc]={st:'failed',why:'No complete snapshot yet. The first read has been requested; a combined account appears after all source teams finish.'};dbFeedNow(acc);return;}
    const J=feedJ(base,F),changes=await dbRestoreTeam(acc,J,P),L=W.LIVE.teams[acc]||{};
    DB.lastJ[acc]=J;FEED_SEEN[acc]=feed&&feed.read_at;
    DB.teams[acc]={st:'ok',loaded:true,people:L.people,shifts:L.shifts,stations:(L.stations||[]).length,secs:Math.round((Date.now()-started)/1000),hist:'ok',
@@ -4934,7 +4934,7 @@ function flowEventsRender(){if(S.page==='audit'&&!document.activeElement.matches
 async function dbStartFlowEvents(){
  if(!DB.on)return;if(FLOWLOG.channel)await DB.sb.removeChannel(FLOWLOG.channel);await dbLoadFlowEvents();
  FLOWLOG.channel=DB.sb.channel('workforce-flow-events').on('postgres_changes',{event:'INSERT',schema:'public',table:'wft_flow_events'},event=>{
-  const row=event.new;if(!FLOWLOG.rows.some(x=>x.id===row.id)){FLOWLOG.rows.unshift(row);FLOWLOG.rows=FLOWLOG.rows.sort((a,b)=>b.id-a.id).slice(0,200);}flowEventsRender();
+  const row=event.new;if(!FLOWLOG.rows.some(x=>x.id===row.id)){FLOWLOG.rows.unshift(row);FLOWLOG.rows=FLOWLOG.rows.sort((a,b)=>b.id-a.id).slice(0,200);}if(row.action==='Snapshot'&&row.status==='Saved'&&S.auth&&readAccs().includes(row.account_id))feedPoll([row.account_id]).catch(e=>console.warn('Snapshot reload',e.message));flowEventsRender();
  }).subscribe(status=>{FLOWLOG.state=status==='SUBSCRIBED'?'Live updates':status==='CHANNEL_ERROR'||status==='TIMED_OUT'?'Reconnecting · checking every 15 seconds':'Connecting';if(status==='SUBSCRIBED')dbLoadFlowEvents().then(flowEventsRender);});
 }
 setInterval(()=>{if(DB.on&&S.auth&&S.page==='audit'&&document.visibilityState==='visible')dbLoadFlowEvents().then(flowEventsRender);},15000);
