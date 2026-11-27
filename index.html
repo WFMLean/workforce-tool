@@ -1916,8 +1916,9 @@ function readTeamShifts(accId, J, stOf) {
     ((perDay[s.userId] = perDay[s.userId] || {})[d] = perDay[s.userId][d] || []).push({ s: m, e, label: s.label, notes: s.notes, activities: readShiftActivities({acc:accId,shiftsZone:s.sourceTimeZone},d,s.activities) }); });
   Object.entries(perDay).forEach(([id, byD]) => Object.entries(byD).forEach(([d, list]) => { const { main, others } = mergeDayShifts(list);
     (imported[id]=imported[id]||{})[d]={main,others};
-    const rs=tsName(main.parts.map(p=>p.label).find(n=>RCFG[tsName(n)])||'');
-    if(RCFG[rs]) (tagged[id]=tagged[id]||{})[d]=rs;
+    const reasonParts=list.filter(p=>p.s<main.e && p.e>main.s && RCFG[tsName(p.label)]);
+    const reasonPart=reasonParts.find(p=>!RCFG[tsName(p.label)].rest)||reasonParts[0];
+    if(reasonPart)(tagged[id]=tagged[id]||{})[d]={reason:tsName(reasonPart.label),s:reasonPart.s,e:reasonPart.e};
     (codes[id] = codes[id] || {})[d] = ensureTemplate(main.s, main.e, 'Shifts'); days.push(d); }));
   return { codes, days, imported, tagged };
 }
@@ -1966,7 +1967,11 @@ function readTeamLeave(accId, J, stOf, R) {
     if(prev===undefined)return;                                          // already a whole day
     const prevWin=prev?o.absence.win||[]:[],w0=Math.max(s0,t.from)-s0+sh.s,w1=Math.min(e0,t.to)-s0+sh.s;   // the leave window in shift minutes
     const mins=Math.min(len,(prev||0)+cov);applyTag(t.id,t.d,t.rs);if(mins<len-15&&!RCFG[t.rs].partial){o.absence.mins=mins;o.absence.win=[...prevWin,[w0,w1]];}};
-  Object.entries(tagged).forEach(([id,byD])=>Object.entries(byD).forEach(([d,rs])=>applyTag(id,d,rs)));
+  Object.entries(tagged).forEach(([id,byD])=>Object.entries(byD).forEach(([d,t])=>{
+    if(typeof t==='string')return applyTag(id,d,t);
+    if(RCFG[t.reason].rest)return applyTag(id,d,t.reason,t.s,t.e);
+    applyLeave({id,d,rs:t.reason,from:dayMin(d,t.s),to:dayMin(d,t.e)});
+  }));
   leaveDays.forEach(applyLeave);
   return tags;
 }
