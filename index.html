@@ -4465,6 +4465,11 @@ async function dbProcessDrops() {
 }
 /* daily BI snapshot: one row per person-day (5 weeks back → 3 weeks ahead) into wft_facts; the weekly flow exports it to SharePoint */
 const FACTS_BACK = 35, FACTS_AHEAD = 21;
+async function dbFactRows(from,to,accs) {
+ const rows=[],at=new Date().toISOString();
+ for(const d of range(from,to)){rows.push(...W.buildFacts(d,d,accs).filter(r=>(W.AGI[r.person_id]||{}).live).map(r=>({...r,captured_by:W.ME.name,captured_at:at})));await new Promise(resolve=>setTimeout(resolve,0));}
+ return rows;
+}
 async function dbSnapshotFacts(accs, force) {
   if (!DB.on || !['Admin','RTA'].includes(W.ME.role)) return; accs = (accs || W.LIVE.accs).filter(x => W.ACC[x]); if (!accs.length) return;
   DB.facts = DB.facts || {};
@@ -4472,7 +4477,7 @@ async function dbSnapshotFacts(accs, force) {
     if (error) { DB.facts.last = { at:new Date().toLocaleString(), rows:0, accs, err:'snapshot check failed: ' + error.message }; return; }   // never re-save blindly when the check fails
     const today = new Date().toDateString(), done = new Set((data || []).filter(r => new Date(r.captured_at).toDateString() === today).map(r => r.account_id)); accs = accs.filter(x => !done.has(x)); if (!accs.length) return dbFactsInfo(); }
   DB.facts.busy = true; render();
-  const rows = W.buildFacts(W.addD(TODAY, -FACTS_BACK), W.addD(TODAY, FACTS_AHEAD), accs).filter(r => (W.AGI[r.person_id] || {}).live).map(r => ({ ...r, captured_by:W.ME.name, captured_at:new Date().toISOString() }));
+  const rows = await dbFactRows(W.addD(TODAY, -FACTS_BACK), W.addD(TODAY, FACTS_AHEAD), accs);
   let ok = 0, err = '';
   for (let i = 0; i < rows.length; i += 500) { const { error } = await DB.sb.from('wft_facts').upsert(rows.slice(i, i + 500)); if (error) { err = error.message; break; } ok += Math.min(500, rows.length - i); }
   DB.facts.busy = false; DB.facts.last = { at:new Date().toLocaleString(), rows:ok, accs, err }; if (err) toast('BI snapshot stopped: ' + err); else if (force) toast(`BI snapshot saved · ${ok.toLocaleString()} person-day rows`);
